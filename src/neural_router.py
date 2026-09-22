@@ -1,0 +1,2115 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Dict, List, Optional, Tuple, Any, Union, Protocol, runtime_checkable
+import numpy as np
+import json
+import hashlib
+import re
+import math
+import logging
+import asyncio
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from datetime import datetime
+from jinja2 import Environment, FileSystemLoader, Template
+
+logger = logging.getLogger(__name__)
+
+MODULE_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = (
+    MODULE_ROOT.parent if (MODULE_ROOT.parent / "prompt_templates").exists() else MODULE_ROOT
+)
+PROMPT_TEMPLATE_DIR = PROJECT_ROOT / "prompt_templates"
+TOOL_LIST_PATH = PROMPT_TEMPLATE_DIR / "tool_list.md"
+LEGACY_TOOL_LIST_PATH = MODULE_ROOT / "tool_list.md"
+JINJA_TEMPLATE_PATH = PROMPT_TEMPLATE_DIR / "jinja2_template.md"
+LEGACY_JINJA_TEMPLATE_PATH = MODULE_ROOT / "jinja2_template.md"
+
+
+def read_tool_list(path: Path = TOOL_LIST_PATH) -> List[str]:
+    """Load enabled tool names from tool_list.md (one per line)."""
+    if not path.exists() and LEGACY_TOOL_LIST_PATH.exists():
+        path = LEGACY_TOOL_LIST_PATH
+    try:
+        return [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except FileNotFoundError:
+        return []
+
+
+def load_system_prompt_template(path: Path = JINJA_TEMPLATE_PATH) -> Template:
+    """Load the compiled system prompt template from disk."""
+    if not path.exists() and LEGACY_JINJA_TEMPLATE_PATH.exists():
+        path = LEGACY_JINJA_TEMPLATE_PATH
+    env = Environment(
+        loader=FileSystemLoader(str(path.parent)),
+        autoescape=False,
+        trim_blocks=False,
+        lstrip_blocks=False,
+    )
+    return env.get_template(path.name)
+
+
+@dataclass
+class RouterConfig:
+    """Configuration for the neural router"""
+    context_dim: int = 768
+    num_transformer_layers: int = 4
+    num_attention_heads: int = 8
+    num_templates: int = 16
+    num_tools: int = 32
+    learning_rate: float = 1e-4
+    dropout: float = 0.1
+    weight_decay: float = 0.01
+    num_model_slots: int = 3
+    builtin_tools: List[str] = None
+
+    def __post_init__(self):
+        if self.builtin_tools is None:
+            self.builtin_tools = ['browser', 'python', 'web_search']
+
+
+class ModelSlot(Enum):
+    """Canon-agnostic model slot indices. Semantics defined at runtime via ModelLoader."""
+    SLOT_A = 0
+    SLOT_B = 1
+    SLOT_C = 2
+
+
+@dataclass
+class SlotPredictions:
+    """Output from slot predictor"""
+    model_slot: torch.Tensor  # Shape: [batch, 3] — renamed from reasoning_effort
+    tool_enables: Dict[str, torch.Tensor]  # Each: [batch, 1]
+    tool_weights: torch.Tensor  # Shape: [batch, num_tools]
+    confidence: float = 0.0
+
+
+@dataclass
+class ModelSlotConfig:
+    slot_id: int
+    description: str = ""
+    model_path: Optional[str] = None
+    is_loaded: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SystemOutput:
+    """Unified output replacing Tuple[str,Dict] from SafeRouterWrapper and GarlicOutput."""
+    prompt: str
+    model_slot: ModelSlot
+    routing_decision: Optional[Any] = None
+    entropy_level: Optional[str] = None
+    entropy_value: float = 0.0
+    compression_ratio: float = 1.0
+    original_tokens: int = 0
+    compressed_tokens: int = 0
+    augmented_states: Optional[torch.Tensor] = None
+    hsgm_summary: Optional[torch.Tensor] = None
+    expert_allocation: Optional[torch.Tensor] = None
+    injection_layers: Optional[List[int]] = None
+    grpo_reward: Optional[float] = None
+    trace: Optional[Dict[str, Any]] = None
+
+    @property
+    def meta(self) -> Dict[str, Any]:
+        return {
+            'model_slot': self.model_slot.name,
+            'entropy_level': self.entropy_level,
+            'entropy_value': self.entropy_value,
+            'compression_ratio': self.compression_ratio,
+        }
+
+
+class ModelLoader:
+    """Canon-agnostic model slot manager. No hardcoded model names."""
+
+    def __init__(self, num_slots: int = 3):
+        self._slots: Dict[int, ModelSlotConfig] = {}
+        self._models: Dict[int, Any] = {}
+
+    def register_slot(self, slot_id: int, description: str, model_path: Optional[str] = None) -> None:
+        self._slots[slot_id] = ModelSlotConfig(
+            slot_id=slot_id, description=description, model_path=model_path
+        )
+
+    def predict_slot(self, probs: torch.Tensor) -> ModelSlot:
+        """[batch, 3] probs → ModelSlot via argmax of first sample."""
+        idx = int(probs[0].argmax().item())
+        return ModelSlot(idx)
+
+    def get_active_model(self, slot_id: int) -> Optional[Any]:
+        return self._models.get(slot_id)
+
+    def load_model(self, slot_id: int, model: Any) -> None:
+        self._models[slot_id] = model
+        if slot_id in self._slots:
+            self._slots[slot_id].is_loaded = True
+
+    def get_slot_info(self) -> Dict[int, Dict]:
+        return {
+            sid: {'description': cfg.description, 'is_loaded': cfg.is_loaded}
+            for sid, cfg in self._slots.items()
+        }
+
+
+@dataclass
+class ContextFeatures:
+    """Encoded conversation context"""
+    message_embeddings: torch.Tensor  # [batch, seq_len, dim]
+    user_profile: torch.Tensor  # [batch, profile_dim]
+    metadata: Dict[str, any]
+
+class ContextEncoder(nn.Module):
+    """
+    Encodes conversation history and user profile into context embedding
+    """
+    def __init__(self, config: RouterConfig):
+        super().__init__()
+        self.config = config
+        
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=config.context_dim,
+            nhead=config.num_attention_heads,
+            dim_feedforward=config.context_dim * 4,
+            dropout=config.dropout,
+            activation='gelu',
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=config.num_transformer_layers
+        )
+        
+        # Profile projection
+        self.profile_proj = nn.Linear(128, config.context_dim)
+        
+        # Metadata encoding
+        self.metadata_encoder = nn.Sequential(
+            nn.Linear(64, 256),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(256, config.context_dim)
+        )
+        
+        # Fusion layer
+        self.fusion = nn.Linear(config.context_dim * 3, config.context_dim)
+        
+    def forward(
+        self,
+        message_embs: torch.Tensor,
+        user_profile: torch.Tensor,
+        metadata: torch.Tensor,
+        message_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Args:
+            message_embs: [batch, seq_len, dim]
+            user_profile: [batch, profile_dim]
+            metadata: [batch, metadata_dim]
+            message_mask: [batch, seq_len] optional padding mask
+            
+        Returns:
+            context_embedding: [batch, dim]
+        """
+        # Encode message sequence
+        encoded_msgs = self.transformer(
+            message_embs,
+            src_key_padding_mask=message_mask
+        )
+        # Pool over sequence
+        msg_pooled = encoded_msgs.mean(dim=1)
+        
+        # Project profile
+        profile_encoded = self.profile_proj(user_profile)
+        
+        # Encode metadata
+        metadata_encoded = self.metadata_encoder(metadata)
+        
+        # Fuse all sources
+        fused = torch.cat([msg_pooled, profile_encoded, metadata_encoded], dim=-1)
+        context = self.fusion(fused)
+        
+        return context
+
+
+class SlotPredictorNetwork(nn.Module):
+    """
+    Predicts configuration slots from context embedding
+    """
+    def __init__(self, config: RouterConfig):
+        super().__init__()
+        self.config = config
+        
+        # Model slot selector head (3-way classification — canon-agnostic)
+        self.model_selector_head = nn.Sequential(
+            nn.Linear(config.context_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 3)
+        )
+        
+        # Tool enable gates (binary for each tool)
+        self.tool_gates = nn.ModuleDict({
+            tool_name: nn.Sequential(
+                nn.Linear(config.context_dim, 128),
+                nn.ReLU(),
+                nn.Dropout(config.dropout),
+                nn.Linear(128, 1)
+            )
+            for tool_name in config.builtin_tools
+        })
+        
+        # Tool weight attention
+        self.tool_query = nn.Linear(config.context_dim, config.context_dim)
+        self.tool_key = nn.Linear(config.context_dim, config.context_dim)
+        self.tool_value = nn.Linear(config.context_dim, config.context_dim)
+        
+        self.tool_attention = nn.MultiheadAttention(
+            embed_dim=config.context_dim,
+            num_heads=4,
+            dropout=config.dropout,
+            batch_first=True
+        )
+        
+    def forward(
+        self,
+        context_emb: torch.Tensor,
+        tool_embeddings: torch.Tensor
+    ) -> SlotPredictions:
+        """
+        Args:
+            context_emb: [batch, dim]
+            tool_embeddings: [num_tools, dim]
+            
+        Returns:
+            SlotPredictions object
+        """
+        batch_size = context_emb.shape[0]
+        
+        # Predict model slot
+        reasoning_logits = self.model_selector_head(context_emb)
+        reasoning_probs = F.softmax(reasoning_logits, dim=-1)
+        
+        # Predict tool enables
+        tool_enables = {}
+        for tool_name, gate in self.tool_gates.items():
+            logit = gate(context_emb)
+            prob = torch.sigmoid(logit)
+            tool_enables[tool_name] = prob
+        
+        # Compute tool weights via attention
+        query = self.tool_query(context_emb).unsqueeze(1)  # [batch, 1, dim]
+        
+        # Expand tool embeddings for batch
+        tool_embs_expanded = tool_embeddings.unsqueeze(0).expand(
+            batch_size, -1, -1
+        )  # [batch, num_tools, dim]
+        
+        # Attention over tools
+        attn_output, attn_weights = self.tool_attention(
+            query=query,
+            key=tool_embs_expanded,
+            value=tool_embs_expanded
+        )
+        tool_weights = attn_weights.squeeze(1)  # [batch, num_tools]
+        
+        # Compute confidence (mean max probability across slots)
+        confidence = (
+            reasoning_probs.max(dim=-1)[0].mean() +
+            torch.stack(list(tool_enables.values())).mean()
+        ) / 2
+        
+        return SlotPredictions(
+            model_slot=reasoning_probs,
+            tool_enables=tool_enables,
+            tool_weights=tool_weights,
+            confidence=confidence.item()
+        )
+
+
+class TemplateSelectorNetwork(nn.Module):
+    """
+    Selects template from library based on slot predictions
+    """
+    def __init__(self, config: RouterConfig):
+        super().__init__()
+        self.config = config
+        
+        # Compute total slot dimension
+        slot_dim = (
+            3 +  # reasoning effort
+            len(config.builtin_tools) +  # tool enables
+            config.num_tools  # tool weights
+        )
+        
+        # Gating network
+        self.gate_network = nn.Sequential(
+            nn.Linear(slot_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(128, config.num_templates)
+        )
+        
+    def flatten_slots(self, slot_preds: SlotPredictions) -> torch.Tensor:
+        """Flatten slot predictions into single vector"""
+        components = [slot_preds.model_slot]
+        
+        # Add tool enables
+        for tool_name in self.config.builtin_tools:
+            components.append(slot_preds.tool_enables[tool_name])
+        
+        # Add tool weights
+        components.append(slot_preds.tool_weights)
+        
+        return torch.cat(components, dim=-1)
+    
+    def forward(self, slot_preds: SlotPredictions) -> torch.Tensor:
+        """
+        Args:
+            slot_preds: SlotPredictions object
+            
+        Returns:
+            template_weights: [batch, num_templates]
+        """
+        slot_vector = self.flatten_slots(slot_preds)
+        logits = self.gate_network(slot_vector)
+        weights = F.softmax(logits, dim=-1)
+        return weights
+
+
+# ============================================================================
+# Safety & Validation
+# ============================================================================
+
+class SafetyValidator:
+    """
+    Non-differentiable constraint enforcement
+    """
+    def __init__(self, config: RouterConfig):
+        self.config = config
+        self.violation_log = []
+        
+        # Define immutable sections that must always be present
+        self.immutable_sections = list(REQUIRED_SECTIONS.values())
+        
+    def validate_slots(
+        self,
+        slot_preds: SlotPredictions,
+        context_metadata: Dict
+    ) -> Tuple[SlotPredictions, List[Dict]]:
+        """
+        Enforce hard constraints on slot predictions
+        
+        Returns:
+            (corrected_slots, violations)
+        """
+        violations = []
+        
+        # Rule 1: Tool sparsity constraint
+        tool_weight_sum = slot_preds.tool_weights.sum(dim=-1)
+        over_limit = tool_weight_sum > 3.0
+        if over_limit.any().item():
+            violations.append({
+                'rule': 'tool_sparsity',
+                'severity': 'SOFT',
+                'message': 'Too many tools selected',
+                'field': 'tool_weights'
+            })
+            # Normalize
+            scaled_weights = slot_preds.tool_weights.clone()
+            scaled_weights[over_limit] = (
+                slot_preds.tool_weights[over_limit] /
+                tool_weight_sum[over_limit].unsqueeze(-1) * 2.0
+            )
+            slot_preds.tool_weights = scaled_weights
+        
+        has_tool_calls = context_metadata.get('has_tool_calls', False)
+        if has_tool_calls:
+            any_tool_enabled = any(
+                (enable > 0.5).any().item()
+                for enable in slot_preds.tool_enables.values()
+            )
+            if not any_tool_enabled:
+                violations.append({
+                    'rule': 'tool_dependency',
+                    'severity': 'HARD',
+                    'message': 'Tool calls require enabled tools',
+                    'field': 'tool_enables'
+                })
+                # Enable browser as default
+                browser_gate = slot_preds.tool_enables.get(
+                    'browser',
+                    torch.zeros_like(slot_preds.tool_weights[:, :1])
+                )
+                slot_preds.tool_enables['browser'] = torch.ones_like(browser_gate)
+        
+        self.violation_log.extend(violations)
+        return slot_preds, violations
+    
+    def validate_output(self, generated_prompt: str) -> Tuple[str, List[str]]:
+        """
+        Ensure generated prompt has all required sections
+        """
+        issues = []
+        
+        for section in self.immutable_sections:
+            if section not in generated_prompt:
+                issues.append(f"Missing required section: {section}")
+        
+        return generated_prompt, issues
+
+class HashTextEncoder(nn.Module):
+    """
+    Production-grade hash-based text encoder.
+    Uses multiple hash functions to reduce collisions (like a Bloom filter),
+    with learned projection layers. No external dependencies.
+    
+    This is the same pattern used in production recommendation systems
+    and routing infrastructure at scale.
+    """
+    
+    def __init__(
+        self,
+        vocab_buckets: int = 50000,
+        embed_dim: int = 768,
+        num_hashes: int = 4,
+        max_seq_len: int = 512,
+        dropout: float = 0.1
+    ):
+        super().__init__()
+        self.vocab_buckets = vocab_buckets
+        self.embed_dim = embed_dim
+        self.num_hashes = num_hashes
+        self.max_seq_len = max_seq_len
+        self.sub_dim = embed_dim // num_hashes
+        
+        # Multiple hash embedding tables for collision reduction
+        self.hash_embeddings = nn.ModuleList([
+            nn.Embedding(vocab_buckets, self.sub_dim)
+            for _ in range(num_hashes)
+        ])
+        
+        # Projection to final dimension
+        self.projection = nn.Linear(embed_dim, embed_dim)
+        
+        # Layer normalization for stability
+        self.layer_norm = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
+        
+        # Precompute sinusoidal positional encodings
+        self.register_buffer('pos_encoding', self._create_positional_encoding())
+        
+        # Hash seeds for multiple hash functions
+        self.hash_seeds = [0x9747b28c, 0x7f4a6c55, 0x3b9aca07, 0x1505f171]
+        
+        # Tokenization pattern
+        self._token_pattern = re.compile(r'\b\w+\b|[^\w\s]')
+        
+    def _create_positional_encoding(self) -> torch.Tensor:
+        """Create sinusoidal positional encodings (no learned params)."""
+        position = torch.arange(self.max_seq_len).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, self.embed_dim, 2) * (-math.log(10000.0) / self.embed_dim)
+        )
+        pe = torch.zeros(self.max_seq_len, self.embed_dim)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return pe
+    
+    def _hash_token(self, token: str, seed: int) -> int:
+        """Deterministic hash using SHA256 with seed.
+        
+        Aligned with memory system's HashEmbeddingStage to ensure
+        consistent token representation across router and memory pipelines.
+        """
+        hash_input = f"{seed}:{token.lower()}".encode('utf-8')
+        hash_bytes = hashlib.sha256(hash_input).digest()
+        hash_int = int.from_bytes(hash_bytes[:8], byteorder='little')
+        return hash_int % self.vocab_buckets
+    
+    def _tokenize(self, text: str) -> List[str]:
+        """Simple regex-based tokenization."""
+        if not text:
+            return []
+        tokens = self._token_pattern.findall(text)
+        return tokens[:self.max_seq_len]
+    
+    def forward(self, texts: List[str]) -> torch.Tensor:
+        """
+        Encode a batch of text strings.
+        
+        Args:
+            texts: List of text strings
+            
+        Returns:
+            embeddings: [batch, max_seq_len, embed_dim]
+        """
+        batch_size = len(texts)
+        device = self.hash_embeddings[0].weight.device
+        
+        # Initialize output tensor
+        output = torch.zeros(
+            batch_size, self.max_seq_len, self.embed_dim,
+            device=device
+        )
+        
+        for batch_idx, text in enumerate(texts):
+            tokens = self._tokenize(text)
+            
+            if not tokens:
+                # Empty text gets zero embedding (will be masked)
+                continue
+                
+            for pos, token in enumerate(tokens):
+                if pos >= self.max_seq_len:
+                    break
+                    
+                # Get embeddings from each hash table
+                sub_embeddings = []
+                for hash_idx, seed in enumerate(self.hash_seeds[:self.num_hashes]):
+                    bucket_id = self._hash_token(token, seed)
+                    bucket_tensor = torch.tensor([bucket_id], device=device)
+                    sub_emb = self.hash_embeddings[hash_idx](bucket_tensor)
+                    sub_embeddings.append(sub_emb.squeeze(0))
+                
+                # Concatenate sub-embeddings
+                token_emb = torch.cat(sub_embeddings, dim=-1)
+                output[batch_idx, pos] = token_emb
+        
+        # Apply projection
+        output = self.projection(output)
+        
+        # Add positional encoding
+        output = output + self.pos_encoding[:self.max_seq_len].unsqueeze(0)
+        
+        # Layer norm and dropout
+        output = self.layer_norm(output)
+        output = self.dropout(output)
+        
+        return output
+    
+    def encode_single(self, text: str) -> torch.Tensor:
+        """Convenience method for single text encoding."""
+        return self.forward([text])[0]
+
+    def embed(self, text: str) -> np.ndarray:
+        """Produce a numpy embedding vector from text.
+        
+        Satisfies the EmbeddingInterface protocol for shared
+        embedding contract between router and memory system.
+        """
+        with torch.no_grad():
+            tensor = self.encode_single(text)
+            # Mean-pool across sequence dimension to get fixed-size vector
+            pooled = tensor.mean(dim=0)
+            return pooled.cpu().numpy()
+
+    @property
+    def dim(self) -> int:
+        """Embedding dimensionality. Satisfies EmbeddingInterface."""
+        return self.embed_dim
+
+
+class ProfileEncoder(nn.Module):
+    """
+    Encodes user profile and conversation features into fixed-size vector.
+    Extracts behavioral signals from conversation history using a neutral
+    access class (user/unknown), not paid-tier semantics.
+    """
+    
+    def __init__(self, output_dim: int = 128, dropout: float = 0.1):
+        super().__init__()
+        self.output_dim = output_dim
+        
+        # Access class embedding (non-tiered)
+        self.access_embedding = nn.Embedding(2, 32)  # user, unknown
+        self.access_map = {'user': 0, 'unknown': 1}
+        
+        # Continuous feature projection (8 features -> 64 dims)
+        self.continuous_proj = nn.Sequential(
+            nn.Linear(8, 64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, 64)
+        )
+        
+        # Final projection
+        self.output_proj = nn.Sequential(
+            nn.Linear(96, output_dim),
+            nn.LayerNorm(output_dim)
+        )
+        
+        # Code detection pattern
+        self._code_pattern = re.compile(r'```|def\s+\w+|class\s+\w+|import\s+\w+')
+        self._question_pattern = re.compile(r'\?|how\s+|what\s+|why\s+|when\s+', re.IGNORECASE)
+    
+    def _extract_features(self, context: Dict) -> Tuple[int, torch.Tensor]:
+        """Extract neutral access index and continuous features from context."""
+        # Get messages from context
+        messages = context.get('messages', [])
+        if not messages:
+            messages = []
+        
+        # Access class (normalize away paid/free distinctions)
+        access_raw = context.get(
+            'user_access',
+            context.get('user_class', context.get('user_tier', 'user')),
+        )
+        access_label = str(access_raw).strip().lower()
+        if access_label in {
+            'user',
+            'standard',
+            'free',
+            'paid',
+            'paid_user',
+            'premium',
+            'pro',
+            'max',
+            'team',
+            'enterprise',
+        }:
+            access_idx = self.access_map['user']
+        else:
+            access_idx = self.access_map['unknown']
+        
+        # Continuous features
+        message_count = len(messages)
+        
+        # Calculate message statistics
+        total_chars = 0
+        code_count = 0
+        question_count = 0
+        user_msg_count = 0
+        
+        for msg in messages:
+            content = msg.get('content', '') if isinstance(msg, dict) else str(msg)
+            total_chars += len(content)
+            
+            if self._code_pattern.search(content):
+                code_count += 1
+            if self._question_pattern.search(content):
+                question_count += 1
+            
+            role = msg.get('role', '') if isinstance(msg, dict) else ''
+            if role == 'user':
+                user_msg_count += 1
+        
+        avg_length = total_chars / max(message_count, 1)
+        code_ratio = code_count / max(message_count, 1)
+        question_ratio = question_count / max(message_count, 1)
+        user_ratio = user_msg_count / max(message_count, 1)
+        
+        # Log-scale message count
+        log_msg_count = math.log1p(message_count)
+        log_avg_length = math.log1p(avg_length)
+        
+        # Conversation depth from context
+        conv_depth = context.get('conversation_depth', message_count // 2)
+        log_depth = math.log1p(conv_depth)
+        
+        # Session duration (if available)
+        session_duration = context.get('session_duration_seconds', 0)
+        log_duration = math.log1p(session_duration)
+        
+        features = torch.tensor([
+            log_msg_count,
+            log_avg_length,
+            code_ratio,
+            question_ratio,
+            user_ratio,
+            log_depth,
+            log_duration,
+            float(context.get('has_tool_calls', False))
+        ], dtype=torch.float32)
+        
+        return access_idx, features
+    
+    def forward(self, contexts: List[Dict]) -> torch.Tensor:
+        """
+        Encode batch of contexts into profile vectors.
+        
+        Args:
+            contexts: List of context dictionaries
+            
+        Returns:
+            profiles: [batch, output_dim]
+        """
+        batch_size = len(contexts)
+        device = self.access_embedding.weight.device
+        
+        access_indices = []
+        feature_batch = []
+        
+        for ctx in contexts:
+            access_idx, features = self._extract_features(ctx)
+            access_indices.append(access_idx)
+            feature_batch.append(features)
+        
+        # Stack and move to device
+        access_tensor = torch.tensor(access_indices, device=device)
+        feature_tensor = torch.stack(feature_batch).to(device)
+        
+        # Encode
+        tier_emb = self.access_embedding(access_tensor)  # [batch, 32]
+        feat_emb = self.continuous_proj(feature_tensor)  # [batch, 64]
+        
+        # Concatenate and project
+        combined = torch.cat([tier_emb, feat_emb], dim=-1)
+        output = self.output_proj(combined)
+        
+        return output
+
+
+class MetadataEncoder(nn.Module):
+    """
+    Encodes structured metadata (timestamps, flags, etc.) into fixed-size vector.
+    """
+    
+    def __init__(self, output_dim: int = 64, dropout: float = 0.1):
+        super().__init__()
+        self.output_dim = output_dim
+        
+        # Binary flags projection (5 flags -> 16 dims)
+        self.flag_proj = nn.Linear(5, 16)
+        
+        # Temporal features projection (4 cyclical + 2 linear = 6 -> 24 dims)
+        self.temporal_proj = nn.Linear(6, 24)
+        
+        # Numeric features projection (4 -> 16 dims)
+        self.numeric_proj = nn.Linear(4, 16)
+        
+        # Final projection
+        self.output_proj = nn.Sequential(
+            nn.Linear(56, output_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(output_dim)
+        )
+    
+    def forward(self, contexts: List[Dict]) -> torch.Tensor:
+        """
+        Encode batch of context metadata.
+        
+        Args:
+            contexts: List of context dictionaries
+            
+        Returns:
+            metadata: [batch, output_dim]
+        """
+        batch_size = len(contexts)
+        device = self.flag_proj.weight.device
+        
+        flags_batch = []
+        temporal_batch = []
+        numeric_batch = []
+        
+        for ctx in contexts:
+            # Binary flags
+            flags = torch.tensor([
+                float(ctx.get('has_tool_calls', False)),
+                float(ctx.get('requires_determinism', False)),
+                float(ctx.get('is_continuation', False)),
+                float(ctx.get('has_attachments', False)),
+                float(ctx.get('has_priority_access', ctx.get('is_premium', False)))
+            ], dtype=torch.float32)
+            
+            # Temporal features (cyclical encoding for hour)
+            now = datetime.now()
+            hour = ctx.get('hour_of_day', now.hour)
+            day_of_week = ctx.get('day_of_week', now.weekday())
+            
+            hour_sin = math.sin(2 * math.pi * hour / 24)
+            hour_cos = math.cos(2 * math.pi * hour / 24)
+            dow_sin = math.sin(2 * math.pi * day_of_week / 7)
+            dow_cos = math.cos(2 * math.pi * day_of_week / 7)
+            
+            # Linear temporal
+            session_length = math.log1p(ctx.get('session_length_seconds', 0))
+            time_since_last = math.log1p(ctx.get('seconds_since_last_message', 0))
+            
+            temporal = torch.tensor([
+                hour_sin, hour_cos, dow_sin, dow_cos,
+                session_length, time_since_last
+            ], dtype=torch.float32)
+            
+            # Numeric features
+            numeric = torch.tensor([
+                math.log1p(ctx.get('message_count', 0)),
+                math.log1p(ctx.get('token_count', 0)),
+                math.log1p(ctx.get('tool_call_count', 0)),
+                ctx.get('confidence_threshold', 0.5)
+            ], dtype=torch.float32)
+            
+            flags_batch.append(flags)
+            temporal_batch.append(temporal)
+            numeric_batch.append(numeric)
+        
+        # Stack and move to device
+        flags_tensor = torch.stack(flags_batch).to(device)
+        temporal_tensor = torch.stack(temporal_batch).to(device)
+        numeric_tensor = torch.stack(numeric_batch).to(device)
+        
+        # Encode each component
+        flags_emb = self.flag_proj(flags_tensor)
+        temporal_emb = self.temporal_proj(temporal_tensor)
+        numeric_emb = self.numeric_proj(numeric_tensor)
+        
+        # Concatenate and project
+        combined = torch.cat([flags_emb, temporal_emb, numeric_emb], dim=-1)
+        output = self.output_proj(combined)
+        
+        return output
+
+
+class InputPreparer(nn.Module):
+    """
+    Production-grade input preparation for the Neural Prompt Router.
+    
+    Converts raw context dictionaries into properly encoded tensors:
+    - message_embs: Hash-based text embeddings with positional encoding
+    - user_profile: Behavioral features from conversation history
+    - metadata: Structured metadata encoding
+    
+    This replaces placeholder random tensor generation with real encoding.
+    """
+    
+    def __init__(self, config: RouterConfig):
+        super().__init__()
+        self.config = config
+        
+        # Component encoders
+        self.text_encoder = HashTextEncoder(
+            vocab_buckets=50000,
+            embed_dim=config.context_dim,
+            num_hashes=4,
+            max_seq_len=512,
+            dropout=config.dropout
+        )
+        
+        self.profile_encoder = ProfileEncoder(
+            output_dim=128,
+            dropout=config.dropout
+        )
+        
+        self.metadata_encoder = MetadataEncoder(
+            output_dim=64,
+            dropout=config.dropout
+        )
+        
+        logger.info("InputPreparer initialized with HashTextEncoder, ProfileEncoder, MetadataEncoder")
+    
+    def _extract_message_text(self, context: Dict) -> str:
+        """Extract concatenated message text from context."""
+        messages = context.get('messages', [])
+        if not messages:
+            return ""
+        
+        text_parts = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                text_parts.append(f"[{role}] {content}")
+            else:
+                text_parts.append(str(msg))
+        
+        return " ".join(text_parts)
+    
+    def prepare(self, context: Dict) -> Dict[str, Any]:
+        """
+        Prepare inputs from a single context dictionary.
+        
+        Args:
+            context: Raw context with messages, user_access, etc.
+            
+        Returns:
+            Dictionary with:
+                - message_embs: [1, seq_len, dim]
+                - user_profile: [1, 128]
+                - metadata: [1, 64]
+                - context_metadata: Original context for safety validation
+        """
+        try:
+            # Extract message text
+            message_text = self._extract_message_text(context)
+            
+            # Encode text
+            if message_text:
+                message_embs = self.text_encoder([message_text])
+            else:
+                # Fallback for empty messages
+                device = self.text_encoder.hash_embeddings[0].weight.device
+                message_embs = torch.zeros(1, 10, self.config.context_dim, device=device)
+                logger.debug("Empty message text, using zero embeddings")
+            
+            # Pool to fixed sequence length for router compatibility
+            if message_embs.size(1) > 10:
+                # Take first 10 positions (most relevant for routing)
+                message_embs = message_embs[:, :10, :]
+            elif message_embs.size(1) < 10:
+                # Pad to 10
+                device = message_embs.device
+                pad_size = 10 - message_embs.size(1)
+                padding = torch.zeros(1, pad_size, self.config.context_dim, device=device)
+                message_embs = torch.cat([message_embs, padding], dim=1)
+            
+            # Encode profile
+            user_profile = self.profile_encoder([context])
+            
+            # Encode metadata
+            metadata = self.metadata_encoder([context])
+            
+            return {
+                'message_embs': message_embs,
+                'user_profile': user_profile,
+                'metadata': metadata,
+                'context_metadata': context
+            }
+            
+        except Exception as e:
+            logger.error(f"InputPreparer.prepare failed: {e}")
+            # Graceful fallback to zero tensors
+            device = self.text_encoder.hash_embeddings[0].weight.device
+            return {
+                'message_embs': torch.zeros(1, 10, self.config.context_dim, device=device),
+                'user_profile': torch.zeros(1, 128, device=device),
+                'metadata': torch.zeros(1, 64, device=device),
+                'context_metadata': context
+            }
+    
+    def prepare_batch(self, contexts: List[Dict]) -> Dict[str, Any]:
+        """
+        Prepare inputs from a batch of contexts.
+        
+        Note: NeuralPromptRouter.forward() uses context_metadata for safety
+        validation which is inherently per-sample. For batch routing, call
+        prepare() per context. This method is for tensor batching only.
+        
+        Args:
+            contexts: List of context dictionaries
+            
+        Returns:
+            Dictionary with batched tensors
+        """
+        if not contexts:
+            raise ValueError("Cannot prepare empty batch")
+        
+        # Process each context
+        results = [self.prepare(ctx) for ctx in contexts]
+        
+        # Stack tensors
+        return {
+            'message_embs': torch.cat([r['message_embs'] for r in results], dim=0),
+            'user_profile': torch.cat([r['user_profile'] for r in results], dim=0),
+            'metadata': torch.cat([r['metadata'] for r in results], dim=0),
+            'context_metadata': contexts[0],
+            'all_context_metadata': contexts
+        }
+
+
+# ============================================================================
+# Template Management
+# ============================================================================
+
+# Template files available in workspace (priority order)
+TEMPLATE_FILES = {
+    'og_jinja2': ['og_jinja2_template.jinja2', 'og_jinja2_template.jinja'],
+    'system_prompt': ['system_prompt.jinja2', 'system_prompt.md'],
+    'current_tools': ['tool_manifest.jinja2'],
+    'channel_format': ['channel_format.jinja2', 'channel_format.txt'],
+    'reference_appendix': ['reference_appendix.jinja2'],
+    'tokenizer_profile': ['tokenizer_profile.jinja2'],
+    'message_metadata': ['message_metadata.md'],
+    'jinja_md': ['jinja2_template.md'],
+    'offline_personality': ['offline_reasoning_agent.md'],
+}
+
+# Required sections for valid prompts (from safety validator)
+REQUIRED_SECTIONS = {
+    'channel_definitions': '# Valid channels: analysis, commentary, final.',
+    'tool_call_format': "Calls to these tools must go to the commentary channel: 'functions'.",
+    'citation_rules': '// Cite information from the tool using the following format:',
+}
+
+
+class TemplateLibrary:
+    """
+    Manages template variants and assembly - loads from .jinja2 files
+    
+    Template Selection Mapping:
+    - Template 0: Minimal (low reasoning, no tools)
+    - Template 1: Standard (medium reasoning, browser)
+    - Template 2: Code-focused (high reasoning, python)
+    - Template 3: Research (medium reasoning, browser + web)
+    - Template 4: Advanced (high reasoning, all tools)
+    """
+    MEMORY_LAYER_KEYS = (
+        "user_memories_xml",
+        "profile_preferences_xml",
+        "project_instructions_xml",
+        "styles_xml",
+        "semantic_memories_xml",
+        "archive_references_xml",
+        "memory_context_xml",
+    )
+    MEMORY_TAG_HINTS = (
+        "<userMemories>",
+        "<projectMemories>",
+        "<profilePreferences>",
+        "<projectInstructions>",
+        "<userStyles>",
+        "<semanticMemories>",
+        "<conversationReferences>",
+    )
+
+    def __init__(self, config: RouterConfig):
+        self.config = config
+        self.module_root = Path(__file__).resolve().parent
+        self.workspace_root = (
+            self.module_root.parent
+            if (self.module_root.parent / "prompt_templates").exists()
+            else self.module_root
+        )
+        self.repo_root = self.workspace_root
+
+        template_candidates = [
+            self.workspace_root / "prompt_templates",
+            self.module_root / "prompt_templates",
+            self.module_root,
+        ]
+        self.template_root = next(
+            (candidate for candidate in template_candidates if candidate.exists()),
+            self.module_root,
+        )
+
+        self.load_log_path = (
+            self.workspace_root
+            / "reports"
+            / f"template_load_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        )
+        self.memories_text = self._load_memories()
+        self.reference_appendix_spec = self._load_reference_appendix_spec()
+        
+        # Initialize Jinja2 environment
+        self.jinja_env = Environment(
+            loader=FileSystemLoader(str(self.template_root)),
+            autoescape=False,
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
+        
+        # Load available templates
+        self.loaded_templates: Dict[str, Template] = {}
+        self.raw_templates: Dict[str, str] = {}
+        self.raw_texts: Dict[str, str] = {}
+        self._load_jinja_templates()
+        
+        # Build template index mapping template_id -> rendering config
+        self.templates = self._initialize_templates()
+        self.template_key_by_id = {tid: cfg["template_key"] for tid, cfg in self.templates.items()}
+        self.template_id_by_key = {cfg["template_key"]: tid for tid, cfg in self.templates.items()}
+        
+    def _load_memories(self) -> str:
+        """Load persistent memory blob for prompt conditioning."""
+        memory_candidates = [
+            self.workspace_root / "input_templates" / "reformatted_plaintext_memories.txt",
+            self.module_root / "input_templates" / "reformatted_plaintext_memories.txt",
+        ]
+        for mem_path in memory_candidates:
+            try:
+                return mem_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                self._log_template(f"memory_load_failed: {e}")
+                return ""
+        return ""
+
+    @staticmethod
+    def _coerce_xml_text(value: Any) -> str:
+        """Normalize any value into a trimmed XML-ish string."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        return str(value).strip()
+
+    def _extract_memory_context_layers(self, context: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """
+        Extract structured XML context from metadata/context payloads.
+
+        Supports both camelCase (MemoryManager.as_dict) and snake_case keys.
+        """
+        blank = {key: "" for key in self.MEMORY_LAYER_KEYS}
+        if not isinstance(context, dict):
+            return blank
+
+        source: Dict[str, Any] = {}
+        nested_context = context.get("memory_context")
+        if isinstance(nested_context, dict):
+            source.update(nested_context)
+        legacy_nested = context.get("memoryContext")
+        if isinstance(legacy_nested, dict):
+            source.update(legacy_nested)
+        source.update(context)
+
+        key_aliases = {
+            "user_memories_xml": ("user_memories_xml", "userMemories", "user_memories"),
+            "profile_preferences_xml": (
+                "profile_preferences_xml",
+                "profilePreferences",
+                "profile_preferences",
+            ),
+            "project_instructions_xml": (
+                "project_instructions_xml",
+                "projectInstructions",
+                "project_instructions",
+            ),
+            "styles_xml": ("styles_xml", "styles"),
+            "semantic_memories_xml": (
+                "semantic_memories_xml",
+                "semanticMemories",
+                "semantic_memories",
+            ),
+            "archive_references_xml": (
+                "archive_references_xml",
+                "archiveReferences",
+                "archive_references",
+                "conversationReferences",
+            ),
+        }
+
+        layers = dict(blank)
+        for target_key, aliases in key_aliases.items():
+            for alias in aliases:
+                value = self._coerce_xml_text(source.get(alias))
+                if value:
+                    layers[target_key] = value
+                    break
+
+        direct_xml = self._coerce_xml_text(
+            source.get("memory_context_xml") or source.get("memoryContextXml")
+        )
+        if direct_xml:
+            layers["memory_context_xml"] = direct_xml
+            return layers
+
+        parts = [
+            layers["user_memories_xml"],
+            layers["profile_preferences_xml"],
+            layers["project_instructions_xml"],
+            layers["styles_xml"],
+            layers["semantic_memories_xml"],
+            layers["archive_references_xml"],
+        ]
+        layers["memory_context_xml"] = "\n\n".join(part for part in parts if part)
+        return layers
+
+    def _inject_memory_context_block(self, prompt: str, memory_context_xml: str) -> str:
+        """Inject XML memory context into the system prompt body once."""
+        memory_block = self._coerce_xml_text(memory_context_xml)
+        if not memory_block:
+            return prompt
+        if memory_block in prompt:
+            return prompt
+        if "<|end|>" in prompt:
+            return prompt.replace("<|end|>", f"\n\n{memory_block}\n<|end|>", 1)
+        return f"{prompt}\n\n{memory_block}"
+    
+    def _load_reference_appendix_spec(self) -> str:
+        """Load neutral reference appendix text (raw, non-executable)."""
+        spec_path = self.template_root / "reference_appendix.jinja2"
+        try:
+            return spec_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ""
+        except Exception as e:
+            self._log_template(f"reference_appendix_load_failed: {e}")
+            return ""
+        
+    def _load_jinja_templates(self):
+        """Load all available .jinja2 templates from workspace"""
+        self._log_template("== Template load start ==")
+        for name, filenames in TEMPLATE_FILES.items():
+            if isinstance(filenames, str):
+                filenames = [filenames]
+            
+            loaded = False
+            for filename in filenames:
+                filepath = self.template_root / filename
+                if filepath.exists():
+                    try:
+                        raw_text = filepath.read_text(encoding="utf-8")
+                        self.raw_texts[name] = raw_text
+                    except Exception as e:
+                        self._log_template(f"raw_read_failed {filename}: {e}")
+                    try:
+                        self.loaded_templates[name] = self.jinja_env.get_template(filename)
+                        msg = f"loaded {filename}"
+                        print(f"[templates] {msg}")
+                        self._log_template(msg)
+                        loaded = True
+                        break
+                    except Exception as e:
+                        msg = f"failed {filename}: {e}"
+                        print(f"[templates] {msg}")
+                        self._log_template(msg)
+            if not loaded:
+                msg = f"missing {', '.join(filenames)}"
+                print(f"[templates] {msg}")
+                self._log_template(msg)
+        self._log_template("== Template load end ==")
+
+    def _log_template(self, message: str) -> None:
+        """Append a template load log entry."""
+        try:
+            self.load_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.load_log_path.open("a", encoding="utf-8") as f:
+                f.write(f"[{datetime.now().isoformat()}] {message}\n")
+        except Exception:
+            # Do not raise from logging; best-effort only.
+            pass
+        
+    def _initialize_templates(self) -> Dict[int, Dict]:
+        """
+        Initialize template configurations.
+        Each config specifies which jinja2 template + render params to use.
+        """
+        templates = {}
+        tid = 0
+
+        def add_template(template_key, fallback_builder, params):
+            nonlocal tid
+            templates[tid] = {
+                'template_key': template_key,
+                'fallback_builder': fallback_builder,
+                'params': params,
+            }
+            tid += 1
+
+        # Prioritized known templates if available (no restriction list)
+        if 'system_prompt' in self.loaded_templates:
+            add_template(
+                'system_prompt',
+                self._build_standard_template,
+                {'reasoning_effort': 'medium', 'builtin_tools': ['browser'], 'include_channels': True, 'include_tools': True},
+            )
+
+        if 'channel_format' in self.loaded_templates:
+            add_template(
+                'channel_format',
+                self._build_minimal_template,
+                {'reasoning_effort': 'low', 'builtin_tools': [], 'include_channels': True, 'include_tools': False},
+            )
+
+        if 'tokenizer_profile' in self.loaded_templates:
+            add_template(
+                'tokenizer_profile',
+                self._build_research_template,
+                {'reasoning_effort': 'medium', 'builtin_tools': ['browser'], 'include_channels': True, 'include_tools': True},
+            )
+
+        # Any other successfully loaded templates (including reference_appendix, og_jinja2, etc.)
+        for template_key in self.loaded_templates:
+            if any(cfg['template_key'] == template_key for cfg in templates.values()):
+                continue
+            add_template(
+                template_key,
+                self._build_standard_template,
+                {'reasoning_effort': 'medium', 'builtin_tools': ['browser'], 'include_channels': True, 'include_tools': True},
+            )
+
+        # If nothing loaded, fall back to builtin builders
+        if not templates:
+            add_template(
+                'fallback_minimal',
+                self._build_minimal_template,
+                {'reasoning_effort': 'low', 'builtin_tools': [], 'include_channels': True, 'include_tools': False},
+            )
+            add_template(
+                'fallback_standard',
+                self._build_standard_template,
+                {'reasoning_effort': 'medium', 'builtin_tools': ['browser'], 'include_channels': True, 'include_tools': True},
+            )
+
+        return templates
+    
+    def _render_jinja_template(self, template_key: str, params: Dict) -> Optional[str]:
+        """Attempt to render a jinja2 template with given params"""
+        if template_key in self.loaded_templates:
+            try:
+                template = self.loaded_templates[template_key]
+                context_layers = self._extract_memory_context_layers(params)
+                
+                # Determine model identity: use offline personality if available
+                model_identity = "You are a large language model assistant."
+                if 'offline_personality' in self.raw_texts:
+                    model_identity = self.raw_texts['offline_personality']
+
+                # Add common params
+                render_params = {
+                    'current_date': datetime.now().strftime("%Y-%m-%d"),
+                    'knowledge_cutoff': '2024-06',
+                    'strftime_now': lambda fmt: datetime.now().strftime(fmt),
+                    'add_generation_prompt': False,
+                    'messages': [],
+                    'tools': None,
+                    'memories': self.memories_text,
+                    'memory_blob': self.memories_text,
+                    'reference_appendix_spec': self.reference_appendix_spec,
+                    'model_identity': model_identity,
+                    **context_layers,
+                    **params
+                }
+                
+                rendered = template.render(**render_params)
+                rendered = self._inject_memory_context_block(
+                    rendered,
+                    render_params.get('memory_context_xml', ''),
+                )
+                return rendered
+            except Exception as e:
+                print(f"Template render error ({template_key}): {e}")
+                self._log_template(f"render error {template_key}: {e}")
+                return None
+        if template_key in self.raw_templates:
+            # Return raw text when Jinja parse failed but file exists
+            return self.raw_templates[template_key]
+        return None
+    
+    def _ensure_required_sections(self, prompt: str) -> str:
+        """Inject missing required sections into prompt"""
+        for section_name, section_content in REQUIRED_SECTIONS.items():
+            if section_content not in prompt:
+                # Find insertion point (before <|end|> or at end)
+                if '<|end|>' in prompt:
+                    prompt = prompt.replace(
+                        '<|end|>',
+                        f'\n{section_content}\n<|end|>',
+                        1  # Only first occurrence
+                    )
+                else:
+                    prompt += f'\n{section_content}\n'
+        return prompt
+    
+    # Fallback builders (used when jinja2 templates not available)
+    def _build_minimal_template(self) -> str:
+        return """<|start|>system<|message|>
+You are a large language model assistant.
+Knowledge cutoff: 2024-06
+Current date: {current_date}
+
+Reasoning: low
+
+# Valid channels: analysis, commentary, final.
+<|end|>"""
+    
+    def _build_standard_template(self) -> str:
+        return """<|start|>system<|message|>
+You are a large language model assistant.
+Knowledge cutoff: 2024-06
+Current date: {current_date}
+
+Reasoning: medium
+
+# Tools
+
+## browser
+
+// Tool for browsing.
+// Cite information from the tool using the following format:
+// `【{{cursor}}†L{{line_start}}(-L{{line_end}})?】`
+namespace browser {{
+type search = (_: {{query: string, topn?: number}}) => any;
+type open = (_: {{id?: number | string}}) => any;
+}} // namespace browser
+
+# Valid channels: analysis, commentary, final.
+Calls to these tools must go to the commentary channel: 'functions'.
+<|end|>"""
+    
+    def _build_code_focused_template(self) -> str:
+        return """<|start|>system<|message|>
+You are a large language model assistant.
+Knowledge cutoff: 2024-06
+Current date: {current_date}
+
+Reasoning: high
+
+# Tools
+
+## python
+
+Use this tool to execute Python code in your chain of thought.
+// Cite information from the tool using the following format:
+// Reference outputs in your analysis.
+
+IMPORTANT: Calls to python MUST go in the analysis channel.
+
+# Valid channels: analysis, commentary, final.
+Calls to these tools must go to the commentary channel: 'functions'.
+<|end|>"""
+    
+    def _build_research_template(self) -> str:
+        return """<|start|>system<|message|>
+You are a large language model assistant.
+Knowledge cutoff: 2024-06
+Current date: {current_date}
+
+Reasoning: medium
+
+# Tools
+
+## browser
+
+// Tool for browsing.
+// Cite information from the tool using the following format:
+// `【{{cursor}}†L{{line_start}}(-L{{line_end}})?】`
+namespace browser {{
+type search = (_: {{query: string, topn?: number}}) => any;
+type open = (_: {{id?: number | string}}) => any;
+}} // namespace browser
+
+# Valid channels: analysis, commentary, final.
+Calls to these tools must go to the commentary channel: 'functions'.
+<|end|>"""
+    
+    def _build_advanced_template(self) -> str:
+        return """<|start|>system<|message|>
+You are a large language model assistant.
+Knowledge cutoff: 2024-06
+Current date: {current_date}
+
+Reasoning: high
+
+# Tools
+
+## browser
+
+// Tool for browsing.
+// Cite information from the tool using the following format:
+// `【{{cursor}}†L{{line_start}}(-L{{line_end}})?】`
+namespace browser {{
+type search = (_: {{query: string, topn?: number}}) => any;
+type open = (_: {{id?: number | string}}) => any;
+}} // namespace browser
+
+## python
+
+Use this tool to execute Python code in your chain of thought.
+IMPORTANT: Calls to python MUST go in the analysis channel.
+
+# Valid channels: analysis, commentary, final.
+Calls to these tools must go to the commentary channel: 'functions'.
+<|end|>"""
+    
+    def assemble(
+        self,
+        template_weights: torch.Tensor,
+        slot_preds: SlotPredictions,
+        context_metadata: Dict
+    ) -> str:
+        """
+        Assemble final prompt from template selection.
+        FIXED: Now properly renders appended sub-templates (reference appendix).
+        """
+        # 1. Neural selection: use network output, fall back if ID out of range
+        template_id = template_weights.argmax(dim=-1).item()
+        template_config = self.templates.get(template_id)
+        if template_config is None:
+            # Selected ID out of range — fall back to first loaded template
+            template_config = next(iter(self.templates.values()))
+        
+        # 2. Override params based on slot predictions
+        context_layers = self._extract_memory_context_layers(context_metadata)
+        render_params = template_config['params'].copy()
+        render_params.setdefault('memories', self.memories_text)
+        render_params.setdefault('memory_blob', self.memories_text)
+        render_params.setdefault('reference_appendix_spec', self.reference_appendix_spec)
+        for key, value in context_layers.items():
+            render_params.setdefault(key, value)
+        
+        # Map model slot to template rendering hint
+        slot_idx = slot_preds.model_slot.argmax(dim=-1).item()
+        slot_map = {0: 'low', 1: 'medium', 2: 'high'}
+        render_params['reasoning_effort'] = slot_map.get(slot_idx, 'medium')
+        
+        # Build builtin_tools from slot enables
+        active_tools = []
+        for tool_name, enable in slot_preds.tool_enables.items():
+            if (enable > 0.5).any().item():
+                active_tools.append(tool_name)
+        if active_tools:
+            render_params['builtin_tools'] = active_tools
+        
+        # Add context metadata
+        render_params['model_identity'] = context_metadata.get(
+            'model_identity',
+            'You are a large language model assistant.'
+        )
+        
+        # 3. Render the MAIN template first
+        prompt = self._render_jinja_template(
+            template_config['template_key'],
+            render_params
+        )
+        
+        # Fall back to builder if jinja2 failed
+        if prompt is None:
+            from datetime import datetime
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            prompt = template_config['fallback_builder']().format(current_date=current_date)
+        prompt = self._inject_memory_context_block(
+            prompt,
+            render_params.get('memory_context_xml', ''),
+        )
+
+        # 4. Handle Appended Templates (tool specs and reference appendix)
+        # Append to any rendered template that needs them, not just system_prompt
+
+        # A. Handle Tools
+        tool_spec = self.raw_texts.get('current_tools', '')
+        if tool_spec:
+            tool_tmpl = self.jinja_env.from_string(tool_spec)
+            rendered_tools = tool_tmpl.render(**render_params)
+            prompt += "\n\n# Tools\n\n" + rendered_tools
+
+        # B. Handle reference appendix
+        appendix_raw = self.raw_texts.get('reference_appendix', '')
+        if appendix_raw:
+            appendix_tmpl = self.jinja_env.from_string(appendix_raw)
+            rendered_appendix = appendix_tmpl.render(**render_params)
+            # Strip system message delimiters to prevent nesting
+            rendered_appendix = rendered_appendix.replace("<|start|>system<|message|>", "").replace("<|end|>", "")
+            prompt += "\n\n# Reference Appendix\n\n" + rendered_appendix.strip()
+        
+        # 5. Ensure required sections are present
+        prompt = self._ensure_required_sections(prompt)
+        
+        return prompt
+
+
+# ============================================================================
+# Main Router Class
+# ============================================================================
+
+class NeuralPromptRouter(nn.Module):
+    """
+    Complete neural prompt router system
+    """
+    def __init__(self, config: RouterConfig):
+        super().__init__()
+        self.config = config
+        
+        # Templates first so we can align num_templates with actual library size
+        self.template_library = TemplateLibrary(config)
+        self.config.num_templates = len(self.template_library.templates)
+        
+        # Core components
+        self.context_encoder = ContextEncoder(self.config)
+        self.slot_predictor = SlotPredictorNetwork(self.config)
+        self.template_selector = TemplateSelectorNetwork(self.config)
+        
+        # Non-trainable components
+        self.safety_validator = SafetyValidator(self.config)
+        
+        # Tool embeddings (learnable)
+        self.tool_embeddings = nn.Parameter(
+            torch.randn(config.num_tools, config.context_dim)
+        )
+        
+    def forward(
+        self,
+        message_embs: torch.Tensor,
+        user_profile: torch.Tensor,
+        metadata: torch.Tensor,
+        context_metadata: Dict,
+        message_mask: Optional[torch.Tensor] = None,
+        return_trace: bool = False
+    ) -> Tuple[str, Optional[Dict]]:
+        """
+        Complete forward pass
+        
+        Args:
+            message_embs: [batch, seq_len, dim]
+            user_profile: [batch, profile_dim]
+            metadata: [batch, metadata_dim]
+            context_metadata: Dict with user_access, message_count, etc.
+            message_mask: Optional padding mask
+            return_trace: If True, return execution trace
+            
+        Returns:
+            (generated_prompt, trace_dict or None)
+        """
+        trace = {} if return_trace else None
+        
+        # 1. Encode context
+        context_emb = self.context_encoder(
+            message_embs, user_profile, metadata, message_mask
+        )
+        
+        if return_trace:
+            trace['context_embedding_norm'] = context_emb.norm(dim=-1).item()
+        
+        # 2. Predict slots
+        slot_preds = self.slot_predictor(context_emb, self.tool_embeddings)
+        
+        if return_trace:
+            trace['slot_predictions'] = {
+                'model_slot': slot_preds.model_slot.argmax(dim=-1).item(),
+                'tool_enables': {
+                    k: (v.item() > 0.5)
+                    for k, v in slot_preds.tool_enables.items()
+                },
+                'tool_weights_top5': slot_preds.tool_weights.topk(5).indices.tolist(),
+                'confidence': slot_preds.confidence
+            }
+        
+        # 3. Validate & enforce constraints
+        slot_preds, violations = self.safety_validator.validate_slots(
+            slot_preds, context_metadata
+        )
+        
+        if return_trace:
+            trace['safety_violations'] = violations
+        
+        # 4. Select template
+        template_weights = self.template_selector(slot_preds)
+        
+        if return_trace:
+            trace['template_weights'] = template_weights.tolist()
+            trace['selected_template'] = template_weights.argmax(dim=-1).item()
+        
+        # 5. Assemble final prompt
+        prompt = self.template_library.assemble(
+            template_weights, slot_preds, context_metadata
+        )
+        
+        # 6. Final safety check
+        prompt, issues = self.safety_validator.validate_output(prompt)
+        
+        if return_trace:
+            trace['output_issues'] = issues
+            trace['prompt_length'] = len(prompt)
+        
+        return prompt, trace
+
+
+# ============================================================================
+# Training Infrastructure
+# ============================================================================
+
+class RouterTrainer:
+    """
+    Training pipeline for prompt router
+    """
+    def __init__(self, router: NeuralPromptRouter, config: RouterConfig):
+        self.router = router
+        self.config = config
+        
+        self.optimizer = torch.optim.AdamW(
+            router.parameters(),
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay
+        )
+        
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer,
+            T_max=100  # num_epochs
+        )
+        
+    def compute_loss(
+        self,
+        slot_preds: SlotPredictions,
+        template_weights: torch.Tensor,
+        targets: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Multi-objective loss computation
+        """
+        losses = {}
+        
+        # Loss 1: Model slot classification
+        if 'target_reasoning' in targets:
+            losses['reasoning'] = F.cross_entropy(
+                slot_preds.model_slot,
+                targets['target_reasoning']
+            )
+        
+        # Loss 2: Tool enable prediction
+        tool_loss = 0
+        for tool_name in self.config.builtin_tools:
+            if f'target_{tool_name}' in targets:
+                tool_loss += F.binary_cross_entropy(
+                    slot_preds.tool_enables[tool_name],
+                    targets[f'target_{tool_name}']
+                )
+        losses['tools'] = tool_loss
+        
+        # Loss 3: Template selection
+        if 'target_template' in targets:
+            losses['template'] = F.cross_entropy(
+                template_weights,
+                targets['target_template']
+            )
+        
+        # Loss 4: Sparsity regularization
+        losses['sparsity'] = 0.01 * slot_preds.tool_weights.abs().sum()
+        
+        # Combined loss
+        total_loss = (
+            losses.get('reasoning', 0) +
+            losses.get('tools', 0) +
+            0.5 * losses.get('template', 0) +
+            losses['sparsity']
+        )
+        losses['total'] = total_loss
+        
+        return losses
+    
+    def train_step(self, batch: Dict) -> Dict[str, float]:
+        """Single training step"""
+        self.optimizer.zero_grad()
+        
+        # Forward pass
+        context_emb = self.router.context_encoder(
+            batch['message_embs'],
+            batch['user_profile'],
+            batch['metadata']
+        )
+        
+        slot_preds = self.router.slot_predictor(
+            context_emb,
+            self.router.tool_embeddings
+        )
+        
+        template_weights = self.router.template_selector(slot_preds)
+        
+        # Compute loss
+        losses = self.compute_loss(
+            slot_preds,
+            template_weights,
+            batch['targets']
+        )
+        
+        # Backward pass
+        losses['total'].backward()
+        torch.nn.utils.clip_grad_norm_(self.router.parameters(), 1.0)
+        self.optimizer.step()
+        
+        return {k: v.item() for k, v in losses.items()}
+
+
+# ============================================================================
+# Inference Wrapper with Fallback
+# ============================================================================
+
+class SafeRouterWrapper:
+    """
+    Production wrapper with fallback to Jinja2.
+    
+    Uses InputPreparer for proper context encoding and includes:
+    - Automatic fallback on failure
+    - Failure tracking with exponential backoff consideration
+    - Comprehensive logging for debugging
+    - Device-aware tensor handling
+    """
+    
+    def __init__(
+        self,
+        neural_router: NeuralPromptRouter,
+        jinja_template: any,  # Your existing Jinja2 template
+        device: Optional[torch.device] = None,
+        memory_manager: Optional[Any] = None,
+    ):
+        self.neural_router = neural_router
+        self.jinja_template = jinja_template
+        self.memory_manager = memory_manager
+        self.failure_count = 0
+        self.total_routes = 0
+        self.neural_routes = 0
+        
+        # Determine device
+        if device is None:
+            device = next(neural_router.parameters()).device
+        self.device = device
+        
+        # Initialize production-grade input preparer
+        self.input_preparer = InputPreparer(neural_router.config)
+        self.input_preparer.to(device)
+        
+        logger.info(f"SafeRouterWrapper initialized on device: {device}")
+        if memory_manager:
+            logger.info("Memory system integrated — hybrid retrieval active")
+        
+    def route(
+        self,
+        context: Dict,
+        use_neural: bool = True,
+        timeout: float = 5.0
+    ) -> Tuple[str, Dict]:
+        """
+        Route with automatic fallback.
+        
+        Args:
+            context: Context dictionary with messages, user_access, etc.
+            use_neural: Whether to attempt neural routing
+            timeout: Timeout for neural routing (future use)
+            
+        Returns:
+            (generated_prompt, metadata_dict)
+        """
+        self.total_routes += 1
+        
+        # Check if deterministic mode required
+        if context.get('requires_determinism', False):
+            return self._fallback_route(context, reason='determinism_required')
+        
+        # Check failure threshold (circuit breaker pattern)
+        if not use_neural or self.failure_count > 10:
+            reason = 'disabled' if not use_neural else 'circuit_breaker_open'
+            return self._fallback_route(context, reason=reason)
+        
+        try:
+            # Prepare inputs using production encoder
+            inputs = self._prepare_inputs(context)
+            
+            # Neural routing
+            prompt, trace = self.neural_router(
+                **inputs,
+                return_trace=True
+            )
+            
+            # Validate output
+            if self._validate_prompt(prompt):
+                self.failure_count = max(0, self.failure_count - 1)
+                self.neural_routes += 1
+                return prompt, {
+                    'method': 'neural',
+                    'trace': trace,
+                    'success_rate': self.neural_routes / self.total_routes
+                }
+            else:
+                logger.warning("Neural routing produced invalid prompt, falling back")
+                return self._fallback_route(context, reason='validation_failed')
+                
+        except Exception as e:
+            self.failure_count += 1
+            logger.error(f"Neural routing failed: {e}", exc_info=True)
+            return self._fallback_route(context, reason=f'exception: {str(e)}')
+    
+    def _fallback_route(self, context: Dict, reason: str) -> Tuple[str, Dict]:
+        """Fallback to Jinja2 template with proper error handling."""
+        try:
+            context_layers = self.neural_router.template_library._extract_memory_context_layers(
+                context
+            )
+            render_params = {
+                'current_date': datetime.now().strftime("%Y-%m-%d"),
+                'knowledge_cutoff': '2024-06',
+                'strftime_now': lambda fmt: datetime.now().strftime(fmt),
+                'add_generation_prompt': False,
+                'messages': context.get('messages', []),
+                'tools': context.get('tools'),
+                'model_identity': context.get(
+                    'model_identity',
+                    'You are a large language model assistant.'
+                ),
+                **context_layers,
+            }
+            prompt = self.jinja_template.render(**render_params)
+            prompt = self.neural_router.template_library._inject_memory_context_block(
+                prompt,
+                context_layers.get('memory_context_xml', ''),
+            )
+            return prompt, {
+                'method': 'jinja2_fallback',
+                'reason': reason,
+                'failure_count': self.failure_count
+            }
+        except Exception as e:
+            logger.error(f"Jinja2 fallback also failed: {e}")
+            # Ultimate fallback - return minimal valid prompt
+            return self._emergency_fallback(context, original_reason=reason, fallback_error=str(e))
+    
+    def _emergency_fallback(self, context: Dict, original_reason: str, fallback_error: str) -> Tuple[str, Dict]:
+        """Emergency fallback when both neural and Jinja2 fail."""
+        prompt = """<|start|>system<|message|>
+You are a large language model assistant.
+Knowledge cutoff: 2024-06
+Current date: {date}
+
+# Valid channels: analysis, commentary, final.
+Calls to these tools must go to the commentary channel: 'functions'.
+// Cite information from the tool using the following format:
+<|end|>""".format(date=datetime.now().strftime("%Y-%m-%d"))
+        
+        return prompt, {
+            'method': 'emergency_fallback',
+            'original_reason': original_reason,
+            'fallback_error': fallback_error,
+            'failure_count': self.failure_count
+        }
+    
+    def _prepare_inputs(self, context: Dict) -> Dict:
+        """
+        Convert context dict to properly encoded model inputs.
+        
+        Uses the production InputPreparer for:
+        - Hash-based message text encoding
+        - Profile feature extraction
+        - Metadata encoding
+        """
+        prepared = self.input_preparer.prepare(context)
+        
+        # Ensure tensors are on correct device
+        return {
+            'message_embs': prepared['message_embs'].to(self.device),
+            'user_profile': prepared['user_profile'].to(self.device),
+            'metadata': prepared['metadata'].to(self.device),
+            'context_metadata': prepared['context_metadata']
+        }
+    
+    def _validate_prompt(self, prompt: str) -> bool:
+        """Validate generated prompt"""
+        required = ['<|start|>system<|message|>', '<|end|>']
+        return all(section in prompt for section in required)
+
+    def _build_memory_context(self, context: Dict) -> Dict[str, str]:
+        """
+        Build memory context layers via the integrated MemoryManager.
+        
+        When a MemoryManager is wired in, this method calls the
+        prompt assembler to produce all memory layers (summary,
+        preferences, semantic, archive) for injection into the
+        template rendering pipeline.
+        
+        Returns:
+            Dictionary of memory context layers keyed by layer name,
+            or empty dict if no memory manager is configured.
+        """
+        if not self.memory_manager:
+            return {}
+
+        user_id = context.get('user_id', '')
+        if not user_id:
+            return {}
+
+        current_query = ''
+        messages = context.get('messages', [])
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get('role') == 'user':
+                current_query = msg.get('content', '')
+                break
+
+        if not current_query:
+            return {}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context — schedule as coroutine
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    memory_context = pool.submit(
+                        asyncio.run,
+                        self.memory_manager.build_prompt_context(
+                            user_id=user_id,
+                            current_query=current_query,
+                        )
+                    ).result(timeout=5.0)
+            else:
+                memory_context = loop.run_until_complete(
+                    self.memory_manager.build_prompt_context(
+                        user_id=user_id,
+                        current_query=current_query,
+                    )
+                )
+            return memory_context
+        except Exception as exc:
+            logger.warning(
+                f"Memory context assembly failed: {exc}",
+                exc_info=True,
+            )
+            return {}
+
+    def get_all_tool_definitions(self) -> List[Dict[str, Any]]:
+        """
+        Return unified tool definitions from both the router config
+        and the memory system. Merges RouterConfig.builtin_tools with
+        MemoryToolDefinitions into a single source of truth.
+        
+        This ensures callers get a complete tool manifest without
+        querying router and memory system separately.
+        """
+        router_tools = []
+        for tool_name in self.neural_router.config.builtin_tools:
+            router_tools.append({
+                'type': 'function',
+                'function': {
+                    'name': tool_name,
+                    'description': f'Built-in {tool_name} tool',
+                    'parameters': {'type': 'object', 'properties': {}},
+                }
+            })
+
+        memory_tools = []
+        if self.memory_manager:
+            memory_tools = self.memory_manager.get_tool_definitions()
+
+        # Deduplicate by function name
+        seen_names = set()
+        unified = []
+        for tool in memory_tools + router_tools:
+            name = tool.get('function', {}).get('name', '')
+            if name and name not in seen_names:
+                seen_names.add(name)
+                unified.append(tool)
+
+        return unified
+
+
+# ============================================================================
+# Example Usage
+# ============================================================================
+
+if __name__ == '__main__':
+    # Initialize
+    config = RouterConfig(
+        context_dim=768,
+        num_templates=16,
+        num_tools=32
+    )
+    
+    router = NeuralPromptRouter(config)
+    
+    # Example inference
+    batch = {
+        'message_embs': torch.randn(1, 10, 768),
+        'user_profile': torch.randn(1, 128),
+        'metadata': torch.randn(1, 64),
+        'context_metadata': {
+            'user_access': 'user',
+            'message_count': 5,
+            'has_tool_calls': False
+        }
+    }
+    
+    prompt, trace = router(**batch, return_trace=True)
+    
+    print("Generated Prompt:")
+    print(prompt)
+    print("\nExecution Trace:")
+    print(json.dumps(trace, indent=2))

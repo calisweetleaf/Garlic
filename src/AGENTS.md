@@ -1,0 +1,7 @@
+# Subfolder of core Garlic Components
+
+> Contains the actual core garlic system. Garlic itself is a routing like system orchestrator. The garlic project started not chasing entropy, but seemingly infinite context + possibility of multiple agents shared context. That lead a lot of leads to Pangu 5.5 and the theoretical recreation internally.
+
+> lora-moe can be looked at like revision 2/or if we use qwen then qwen3.5 (qwen-garlic), well then this would be qwen-garlic-2. This is part of the fuel rod idea, essentially every expert can be activated and is dynamically activated during generation as the model needs. This uses same components of garlic just a possible second feature.
+
+> Garlic right now is able to be tested with models, but it must be trained with a base model harness through the *`system_router.py`* with the base Pre-Trained model, this will use the *garlic_rlhf_integration.py*, which uses the full-rlhf-pipeline, to train yhe Garlic side components. They will then use a model merging utility and merge back to one model. The `neural_router.py` is a trainable prompt routing system, it is opinional for garlic but I (daeron) wanted to integrate in order to have a system thag could load multiple models and then have them reason over 1 hsgm graph, actual trained models, further we have the forward/hidden modifications. This is not embeddings nor should that ever be introduced

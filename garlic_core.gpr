@@ -1,0 +1,36 @@
+project Garlic_Core is
+
+   for Source_Dirs use (".");
+   for Object_Dir use "obj";
+   for Library_Dir use "lib";
+   for Library_Name use "garlic_core";
+   for Library_Kind use "dynamic";
+
+   package Compiler is
+      for Default_Switches ("Ada") use (
+         "-gnat2022",           -- Ada 2022 standard
+         "-O2",                 -- Optimization level
+         "-gnatf",              -- Full error info
+         "-gnatQ",              -- Don't quit on errors
+         "-gnata",              -- Assertions / Pre / Post / Predicate checking
+         "-fPIC"                -- Position-independent code (required for .so)
+         -- Note: -gnatE (dynamic elaboration checking) intentionally omitted.
+         -- It inserts elaboration checks BEFORE function bodies, outside our
+         -- exception handlers, causing SIGSEGV when called from non-Ada main
+         -- programs (Python/C).  Static elaboration model is safe here because
+         -- all packages are in the same library and always elaborated together.
+      );
+   end Compiler;
+
+   package Binder is
+      for Default_Switches ("Ada") use (
+         "-shared"  -- Standalone shared library mode: auto-generates adainit/adafinal
+                    -- via .init_array/.fini_array so Python dlopen triggers elaboration.
+      );
+   end Binder;
+
+   package Library is
+      for Library_Interface use ("Step_Entropy", "Step_Entropy_C_API");
+   end Library;
+
+end Garlic_Core;
