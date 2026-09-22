@@ -1,0 +1,477 @@
+V "GNAT Lib v14"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnatf
+A -gnatQ
+A -gnata
+A -fPIC
+A -mtune=generic
+A -march=x86-64
+P SS ZX
+
+RN
+RV NO_DIRECT_BOOLEAN_OPERATORS
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_LOOPS
+RV NO_ELABORATION_CODE
+
+U step_entropy%b	step_entropy.adb	e4c6667f OO PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+W ada.containers.generic_array_sort%s
+Z ada.containers.generic_constrained_array_sort%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.elementary_functions%s  a-nuelfu.ads  a-nuelfu.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.fat_flt%s	s-fatflt.ads		s-fatflt.ali
+Z system.img_flt%s	s-imgflt.ads		s-imgflt.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+
+U step_entropy%s	step_entropy.ads	d8e6651b EE NE OO PK
+
+D ada.ads		20250523110204 76789da1 ada%s
+D a-assert.ads		20250523110204 ba465f5c ada.assertions%s
+D a-contai.ads		20250523110204 61e5e089 ada.containers%s
+D a-cgarso.ads		20250523110204 9129bfa8 ada.containers.generic_array_sort%s
+D a-cgarso.adb		20250523110204 59f5315a ada.containers.generic_array_sort%b
+D a-cgcaso.ads		20250523110204 9f1e835c ada.containers.generic_constrained_array_sort%s
+D a-cgcaso.adb		20250523110204 21f0752d ada.containers.generic_constrained_array_sort%b
+D a-except.ads		20250523110204 e7970cd9 ada.exceptions%s
+D a-numeri.ads		20250523110204 84bea7a3 ada.numerics%s
+D a-nuelfu.ads		20250523110204 03e83d1c ada.numerics.elementary_functions%s
+D a-ngelfu.ads		20250523110204 5506716e ada.numerics.generic_elementary_functions%s
+D a-unccon.ads		20250523110204 0e9b276f ada.unchecked_conversion%s
+D step_entropy.ads	20260903124202 d8e6651b step_entropy%s
+D step_entropy.adb	20260903124202 2a5f2673 step_entropy%b
+D system.ads		20250523110204 14286b0f system%s
+D s-assert.ads		20250523110204 9c4520c7 system.assertions%s
+D s-exctab.ads		20250523110204 91bef6ef system.exception_table%s
+D s-fatflt.ads		20250523110204 11beb392 system.fat_flt%s
+D s-fatgen.ads		20250523110204 d28c6cfe system.fat_gen%s
+D s-imagei.ads		20250523110204 5e131ce0 system.image_i%s
+D s-imager.ads		20250523110204 45c7157d system.image_r%s
+D s-imageu.ads		20250523110204 b0b50650 system.image_u%s
+D s-imgflt.ads		20250523110204 d12816b5 system.img_flt%s
+D s-imgint.ads		20250523110204 67e4edfb system.img_int%s
+D s-imguns.ads		20250523110204 c4e23690 system.img_uns%s
+D s-parame.ads		20260317171448 a1aeab5c system.parameters%s
+D s-powflt.ads		20250523110204 a51ab9b8 system.powten_flt%s
+D s-secsta.ads		20250523110204 578279f5 system.secondary_stack%s
+D s-stalib.ads		20250523110204 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250523110204 ccded4e8 system.storage_elements%s
+D s-traent.ads		20250523110204 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250523110204 fa2a7f59 system.unsigned_types%s
+D s-valspe.ads		20250523110204 b0fcd073 system.val_spec%s
+D s-vaispe.ads		20250523110204 8280550e system.value_i_spec%s
+D s-vauspe.ads		20250523110204 89269ba5 system.value_u_spec%s
+D s-vs_int.ads		20250523110204 06b6b724 system.vs_int%s
+D s-vs_uns.ads		20250523110204 e7f47a27 system.vs_uns%s
+G a e
+G c Z s b [calculate_token_entropy step_entropy 248 13 none]
+G c Z s b [calculate_token_probability step_entropy 258 13 none]
+G c Z s b [calculate_step_entropy step_entropy 276 13 none]
+G c Z s b [classify_entropy step_entropy 302 13 none]
+G c Z s b [is_compressible step_entropy 319 13 none]
+G c Z s b [is_informative step_entropy 325 13 none]
+G c Z s b [analyze_chain step_entropy 341 13 none]
+G c Z s b [route_step step_entropy 365 13 none]
+G c Z s b [batch_route step_entropy 381 13 none]
+G c Z s b [recommend_pruning step_entropy 402 14 none]
+G c Z s b [initialize_window step_entropy 431 14 none]
+G c Z s b [add_token_to_window step_entropy 443 13 none]
+G c Z s b [is_window_full step_entropy 454 13 none]
+G c Z s b [get_window_count step_entropy 458 13 none]
+G c Z s b [get_step_counter step_entropy 463 13 none]
+G c Z s b [flush_window step_entropy 469 14 none]
+G c Z s b [compute_histogram step_entropy 494 13 none]
+G c Z s b [initialize_threshold_state step_entropy 514 14 none]
+G c Z s b [update_threshold_state step_entropy 527 14 none]
+G c Z s b [get_adaptive_thresholds step_entropy 540 14 none]
+G c Z s b [normalize_entropy step_entropy 556 13 none]
+G c Z s b [compute_grpo_rewards step_entropy 585 13 none]
+G c Z s s [Tlogit_arrayBIP step_entropy 111 4 none]
+G c Z s s [Tentropy_arrayBIP step_entropy 112 4 none]
+G c Z s s [Tprobability_arrayBIP step_entropy 113 4 none]
+G c Z s s [Ttoken_id_arrayBIP step_entropy 114 4 none]
+G c Z s s [integer_arrayIP step_entropy 115 9 none]
+G c Z s s [natural_arrayIP step_entropy 116 9 none]
+G c Z s s [Ttoken_text_arrayBIP step_entropy 120 4 none]
+G c Z s s [token_entropyIP step_entropy 126 9 none]
+G c Z s s [Ttoken_entropy_arrayBIP step_entropy 134 4 none]
+G c Z s s [token_logits_arrayIP step_entropy 136 9 none]
+G c Z s s [step_entropyIP step_entropy 143 9 none]
+G c Z s s [step_entropy_arrayIP step_entropy 154 9 none]
+G c Z s s [compression_analysisIP step_entropy 160 9 none]
+G c Z s s [routing_decisionIP step_entropy 177 9 none]
+G c Z s s [Thistogram_bin_arrayBIP step_entropy 194 4 none]
+G c Z s s [entropy_histogramIP step_entropy 196 9 none]
+G c Z s s [threshold_stateIP step_entropy 216 9 none]
+G c Z s s [grpo_rewardsIP step_entropy 231 9 none]
+G c Z s s [token_windowIP step_entropy 419 9 none]
+G c Z b b [safe_log step_entropy 36 13 none]
+G c Z b b [softmax step_entropy 52 13 none]
+G c Z b b [batch_route_internal step_entropy 394 14 none]
+G c Z b b [indexed_entropyIP step_entropy 445 9 none]
+G c Z b b [indexed_entropy_arrayIP step_entropy 450 9 none]
+G c Z b b [less_indexed_entropy step_entropy 452 13 none]
+G c Z b b [sort_by_entropyR step_entropy__sort_by_entropyGP15300 460 14 none]
+G c Z b b [sort_by_entropy step_entropy 460 14 none]
+G c Z b b [less_natural step_entropy 480 13 none]
+G c Z b b [natural_index_sortR step_entropy__natural_index_sortGP16379 485 14 none]
+G c Z b b [natural_index_sort step_entropy 485 14 none]
+X 1 ada.ads
+16K9*Ada 20e8 14|10r6 11r6 12r6 16r8 17r8 460r37 485r40
+X 3 a-contai.ads
+16K13*Containers 28e19 14|12r10 460r41 485r44
+X 4 a-cgarso.ads
+17E9 Index_Type 14|461r7 486r7
+18+9 Element_Type 14|462r7 487r7
+19A9 Array_Type(18+9)<17E9> 14|463r7 488r7
+21V19 "<"{boolean} 14|464r8 489r8
+23u26*Generic_Array_Sort 3|16k13 14|12w21 460r52 485r55
+X 5 a-cgarso.adb
+41U14 Sort[6|24] 7|32b26[14|460]
+X 6 a-cgcaso.ads
+24u26*Generic_Constrained_Array_Sort 3|16k13
+X 9 a-numeri.ads
+16K13*Numerics 35e17 14|10w10 11r10 16r12 17r12
+32N4*e 14|41r20
+X 10 a-nuelfu.ads
+18K22*Elementary_Functions[11|39] 14|11w19 16r21
+X 11 a-ngelfu.ads
+53V13*Sqrt{float} 14|699s28[10|18] 787s19[10|18]
+76V13*Log{float} 14|27s35[10|18] 40s17[10|18] 42s17[10|18] 44s17[10|18] 44s33[10|18]
+84V13*Exp{float} 14|67s24[10|18]
+X 13 step_entropy.ads
+51K9*Step_Entropy 601l5 601e17 14|14b14 880l5 880t17
+58f4*K_Skip_High{float} 589r33 14|831r33
+59f4*K_Skip_Low{float} 590r33 14|832r33
+60i4*Tau_Skip_Max{natural} 591r33 14|833r33
+61i4*Tau_Length_Max{natural} 592r33 14|834r33
+62f4*R_Correctness_Value{float}
+63f4*Optimal_Pruning_Ratio{float}
+66f4*Default_Threshold_Low{float}
+67f4*Default_Threshold_High{float}
+73E9*Entropy_Level 73e45 151r25 183r25 306r13 14|258r13 401r15
+73n27*Low{73E9} 309r72 370r24 14|239r26 261r17 327r18 368r15 416r18
+73n32*Medium{73E9} 312r46 375r24 14|243r26 265r17 328r18 376r15 417r18
+73n40*High{73E9} 310r72 372r24 14|241r26 263r17 329r18 372r15 418r18
+82F9*Entropy_Value<float> 112r68 129r26 148r25 149r25 150r25 168r30 180r25
+. 181r25 182r25 251r13 282r24 283r24 303r24 304r24 305r24 321r19 327r19 344r24
+. 345r24 384r24 385r24 473r24 474r24 529r17 542r28 543r28 557r17 14|92r13
+. 110r14 151r24 152r24 156r25 174r33 175r33 176r33 233r31 234r31 235r31 255r24
+. 256r24 257r24 275r19 283r19 296r24 297r24 349r10 397r24 398r24 426r24 427r24
+. 447r17 613r24 614r24 756r17 773r28 774r28 801r25 802r25 810r17
+85F9*Probability_Value<float> 113r68 130r26 261r13 14|117r13 132r17 135r14
+. 157r25
+93F9*Compression_Ratio_Value<float> 167r30 14|342r10
+101I12*Token_ID{integer} 114r68 127r26 260r21 446r26 14|116r21 568r26
+103N4*Max_Tokens_Per_Step 112r43 113r43 114r43 120r41 134r44 137r60 286r38
+. 388r30 500r34 14|163r43 165r59 403r31 553r24 557r28 581r20 664r31
+104N4*Max_Vocab_Size 111r43 14|123r44
+105N4*Max_Histogram_Bins 194r44 197r42 501r34 14|668r22
+111A9*Logit_Array(float)<integer> 136r60 249r16 259r21 445r26 14|52r31 52r51
+. 53r19 90r16 94r17 115r21 119r15 567r26
+112A9*Entropy_Array(82F9)<integer> 382r24 495r19 14|395r24 424r24 644r19
+113A9*Probability_Array(85F9)<integer>
+114A9*Token_ID_Array(101I12)<integer> 278r24 421r23 14|147r24
+115A9*Integer_Array(integer)<integer> 386r13 14|399r28 428r13 429r19
+116A9*Natural_Array(natural)<integer> 406r27 14|488r23 496r27
+118N4*Max_Token_Text_Length 119r42
+119A12*Token_Text{string}<integer> 120r65 128r26 145r25 447r26 14|213r34
+. 569r26
+120A9*Token_Text_Array(119A12)<integer> 279r24 422r23 14|148r24
+126R9*Token_Entropy 132e14 134r68
+127i7*Token_Index{101I12} 14|198m13
+128a7*Token_String{119A12} 14|199m13
+129f7*Entropy{82F9} 14|200m13
+130f7*Probability{85F9} 14|201m13
+131i7*Context_Position{natural} 14|202m13
+134A9*Token_Entropy_Array(126R9)<integer> 147r25
+136A9*Token_Logits_Array(111A9)<integer> 137r35 277r24 14|146r24
+137A12*Window_Logits_Array{136A9}<integer> 420r23
+143R9*Step_Entropy 152e14 154r60 284r13 320r19 326r19 366r33 471r28 14|153r13
+. 155r25 274r19 282r19 360r33 611r28
+144i7*Step_Id{natural} 14|172m14
+145a7*Step_Text{119A12} 14|177m14 224r43 225m26
+146i7*Token_Count{natural} 288r51 14|173m14
+147a7*Token_Entropies{134A9} 14|197m17
+148f7*Total_Entropy{82F9} 289r51 14|174m14 233m14 381r38
+149f7*Avg_Entropy{82F9} 290r51 323r52 329r51 14|175m14 235m14 238r17 240r20
+. 278r19 286r19 332r64 382r38 517r52
+150f7*Max_Entropy{82F9} 14|176m14 234m14 383r38
+151e7*Level{73E9} 370r16 372r16 375r16 14|239m17 241m17 243m17 326r25 367r17
+. 384r38
+154A9*Step_Entropy_Array(143R9)<integer> 342r24 403r23 14|294r24 493r23
+160R9*Compression_Analysis 169e14 346r13 14|298r13 300r28
+161i7*Total_Steps{natural} 348r42 14|335m14
+162i7*Compressible_Steps{natural} 349r42 14|336m14
+163i7*Informative_Steps{natural} 350r42 14|337m14
+164i7*Low_Entropy_Steps{natural} 14|338m14
+165i7*Medium_Entropy_Steps{natural} 14|339m14
+166i7*High_Entropy_Steps{natural} 14|340m14
+167f7*Compression_Ratio{93F9} 14|341m14
+168f7*Avg_Entropy{82F9} 14|348m14
+175E9*Routing_Path 175e45 178r25
+175n26*Fast{175E9} 370r60 14|369r40
+175n32*Normal{175E9} 375r60 14|377r40
+175n40*Slow{175E9} 372r60 14|373r40
+177R9*Routing_Decision 184e14 368r13 14|362r13 364r18
+178e7*Path{175E9} 370r53 372r53 375r53 14|369m22 373m22 377m22
+179b7*Retrieve_Memory{boolean} 371r57 373r53 376r57 14|370m22 374m22 378m22
+180f7*Total_Entropy{82F9} 14|381m16
+181f7*Avg_Entropy{82F9} 14|382m16
+182f7*Max_Entropy{82F9} 14|383m16
+183e7*Level{73E9} 14|384m16
+194A9*Histogram_Bin_Array(natural)<integer> 201r22
+196R9*Entropy_Histogram 205e14 498r13 14|647r13 649r16
+197i7*Bin_Count{integer} 503r46 14|673m14
+198f7*Bin_Width{float} 14|710m20 713m20 718r63
+199f7*Min_Entropy{float} 14|694m14
+200f7*Max_Entropy{float} 14|695m14
+201a7*Bins{194A9} 14|675m14 711m20 723m23 723r48
+202i7*Total_Tokens{natural} 502r46 14|674m14
+203f7*Mean_Entropy{float} 14|693m14
+204f7*Std_Dev{float} 504r46 14|699m17 701m17
+216R9*Threshold_State 222e14 515r31 528r24 541r24 14|737r31 755r24 772r24
+217f7*Running_Mean{float} 14|747m13 764r42 765m13 765r36 767r42 789r25 790r25
+218f7*Running_M2{float} 14|748m13 768m13 768r36 786r25
+219i7*Sample_Count{natural} 520r27 531r26 531r47 545r25 14|749m13 762m13
+. 762r35 766r52 781r16 786r51
+220f7*Low_Sigma_Factor{float} 521r27 14|750m13 789r46
+221f7*High_Sigma_Factor{float} 522r27 14|751m13 790r46
+231R9*GRPO_Rewards 236e14 593r13 14|835r13 837r16
+232f7*R_Skip_Ratio{float} 597r49 14|851m17 853m17 855m17 874r17
+233f7*R_Skip_Num{float} 598r49 14|860m17 862m17 874r39
+234f7*R_Response_Len{float} 599r49 14|867m17 869m17 874r59
+235f7*R_Total{float} 14|873m14
+248V13*Calculate_Token_Entropy{82F9} 249>7 250>7 253r20 14|89b13 190s27
+249a7 Logits{111A9} 14|90b7 102r25
+250f7 Base{float} 252r20 14|91b7 98r10 106r68
+258V13*Calculate_Token_Probability{85F9} 259>7 260>7 14|114b13 139l8 139t35
+. 193s24
+259a7 Logits{111A9} 14|115b7 128r25
+260i7 Token_Index{101I12} 14|116b7 123r10 123r29 125r44 129r25
+276V13*Calculate_Step_Entropy{143R9} 277>7 278>7 279>7 280>7 281>7 282>7
+. 283>7 288r21 289r21 290r21 14|145b13 624s17
+277a7 Token_Logits{136A9} 14|146b7 180r17 180r43 191r13 191r27 194r13 194r27
+. 625r10
+278a7 Token_Ids{114A9} 14|147b7 183r17 183r40 195r13 195r24 198r33 198r44
+. 626r10
+279a7 Token_Texts{120A9} 14|148b7 186r17 186r42 199r33 199r46 214r16 214r29
+. 627r10
+280i7 Token_Count{positive} 285r21 286r21 288r66 14|149b7 163r10 163r29 173r33
+. 179r21 235r61 628r10
+281i7 Step_Id{natural} 14|150b7 172r33 629r10
+282f7 Threshold_Low{82F9} 287r21 14|151b7 168r17 238r31 630r10
+283f7 Threshold_High{82F9} 287r38 14|152b7 168r42 240r34 631r10
+302V13*Classify_Entropy{73E9} 303>7 304>7 305>7 309r46 310r46 312r20 14|254b13
+. 412s19
+303f7 Entropy{82F9} 309r16 310r16 311r16 311r46 14|255b7 260r10 262r13
+304f7 Threshold_Low{82F9} 307r20 309r27 311r27 14|256b7 260r20
+305f7 Threshold_High{82F9} 307r36 310r27 311r57 14|257b7 262r23
+319V13*Is_Compressible{boolean} 320>7 321>7 323r21 14|273b13 318s13
+320r7 Step{143R9} 323r47 14|274b7 278r14
+321f7 Threshold{82F9} 323r66 14|275b7 278r33
+325V13*Is_Informative{boolean} 326>7 327>7 329r21 14|281b13 322s13
+326r7 Step{143R9} 329r46 14|282b7 286r14
+327f7 Threshold{82F9} 329r65 14|283b7 286r33
+341V13*Analyze_Chain{160R9} 342>7 343>7 344>7 345>7 348r21 349r21 350r21
+. 14|293b13
+342a7 Steps{154A9} 14|294b7 317r16 317r31 318r30 322r29 326r15 332r54
+343i7 Step_Count{positive} 347r21 348r63 349r64 350r64 14|295b7 309r10 317r45
+. 335r38 342r71 349r50
+344f7 Threshold_Low{82F9} 347r40 14|296b7 313r17 318r41
+345f7 Threshold_High{82F9} 347r56 14|297b7 313r42 322r40
+365V13*Route_Step{177R9} 366>7 367>7 370r35 371r39 372r35 373r35 375r35 376r39
+. 14|359b13
+366r7 Step{143R9} 370r11 372r11 375r11 14|360b7 367r12 381r33 382r33 383r33
+. 384r33
+367b7 Enable_Memory_Retrieval{boolean} 374r40 14|361b7 374r41
+381V13*Batch_Route{115A9} 382>7 383>7 384>7 385>7 390r20 14|423b13
+382a7 Step_Entropies{112A9} 14|424b7 432r28
+383i7 Count{positive} 387r21 388r21 390r48 14|425b7 429r39 433r28
+384f7 Threshold_Low{82F9} 389r21 14|426b7 434r28
+385f7 Threshold_High{82F9} 389r37 14|427b7 435r28
+402U14*Recommend_Pruning 403>7 404>7 405>7 406<7 407<7 14|492b14
+403a7 Steps{154A9} 14|493b7 517r24 517r31
+404i7 Step_Count{positive} 409r21 412r30 413r45 14|494b7 500r51 504r10 514r21
+. 523r39
+405f7 Pruning_Ratio{float} 410r21 411r21 413r59 14|495b7 508r10 508r33 511r28
+. 523r53
+406a7 Prune_Indices{116A9} 14|496b7 525r25 526r26 530m10 539m30 539r30
+407i7 Count{natural} 412r21 413r21 14|497b7 533m7 538r10 539r50
+419R9*Token_Window 426e14 432r25 444r33 454r38 458r40 463r40 470r31 14|549r25
+. 566r33 594r38 599r40 604r40 610r31
+420a7*Logits{137A12} 14|585m14 625r35
+421a7*Token_Ids{114A9} 14|586m14 626r35
+422a7*Token_Texts{120A9} 14|587m14 627r35
+423i7*Current_Count{natural} 435r28 449r27 450r28 450r51 452r32 456r28 459r53
+. 476r28 14|561m14 575r17 579r25 588m14 590r21 596r21 601r21 618r17 622r29
+. 634m14
+424i7*Window_Size{positive} 436r28 449r50 452r56 456r52 14|560m14 575r41
+. 590r45 596r45
+425i7*Step_Counter{natural} 437r28 464r53 477r28 477r51 14|562m14 606r21
+. 635m14 635r38
+431U14*Initialize_Window 432<7 433>7 14|548b14
+432r7 Window{419R9} 435r21 436r21 437r21 14|549b7 560m7 561m7 562m7
+433i7 Window_Size{positive} 436r44 14|550b7 553r10 555r45 560r31
+443V13*Add_Token_To_Window{boolean} 444=7 445>7 446>7 447>7 451r21 14|565b13
+444r7 Window{419R9} 449r20 449r43 450r21 450r44 452r25 452r49 14|566b7 575r10
+. 575r34 579r18 585m7 586m7 587m7 588m7 590r14 590r38
+445a7 Logits{111A9} 14|567b7 585r39
+446i7 Token_Index{101I12} 14|568b7 586r39
+447a7 Token_Text_Value{119A12} 14|569b7 587r39
+454V13*Is_Window_Full{boolean} 454>29 455r21 14|594b13
+454r29 Window{419R9} 456r21 456r45 14|594b29 596r14 596r38
+458V13*Get_Window_Count{natural} 458>31 459r20 14|599b13
+458r31 Window{419R9} 459r46 14|599b31 601r14
+463V13*Get_Step_Counter{natural} 463>31 464r20 14|604b13
+463r31 Window{419R9} 464r46 14|604b31 606r14
+469U14*Flush_Window 470=7 471<7 472>7 473>7 474>7 14|609b14
+470r7 Window{419R9} 476r21 477r21 477r44 14|610b7 618r10 622r22 625r28 626r28
+. 627r28 634m7 635m7 635r31
+471r7 Result{143R9} 14|611b7 624m7
+472i7 Step_Id{natural} 14|612b7 629r28
+473f7 Threshold_Low{82F9} 14|613b7 630r28
+474f7 Threshold_High{82F9} 14|614b7 631r28
+494V13*Compute_Histogram{196R9} 495>7 496>7 497>7 502r21 503r21 504r21 14|643b13
+495a7 Entropies{112A9} 14|644b7 657r31 658r31 680r44 718r30
+496i7 Count{positive} 499r21 500r21 502r61 14|645b7 664r10 664r23 674r30
+. 678r21 697r10 698r39 711r33 715r27
+497i7 Bin_Count{positive} 501r21 503r61 14|646b7 668r10 673r30 713r52 722r56
+514U14*Initialize_Threshold_State 515<7 516>7 517>7 14|736b14
+515r7 State{216R9} 520r21 521r21 522r21 14|737b7 747m7 748m7 749m7 750m7
+. 751m7
+516f7 Low_Sigma_Factor{float} 519r20 521r47 14|738b7 742r10 750r34
+517f7 High_Sigma_Factor{float} 519r39 522r47 14|739b7 742r30 751r34
+527U14*Update_Threshold_State 528=7 529>7 14|754b14
+528r7 State{216R9} 531r20 531r41 14|755b7 762m7 762r29 764r36 765m7 765r30
+. 766r46 767r36 768m7 768r30
+529f7 Entropy{82F9} 14|756b7 758r41
+540U14*Get_Adaptive_Thresholds 541>7 542<7 543<7 14|771b14 803l8 803t31
+541r7 State{216R9} 545r19 14|772b7 781r10 786r19 786r45 789r19 789r40 790r19
+. 790r40
+542f7 Threshold_Low{82F9} 14|773b7 801m7
+543f7 Threshold_High{82F9} 14|774b7 802m7
+556V13*Normalize_Entropy{float} 557>7 558>7 559>7 14|809b13 821l8 821t25
+557f7 Entropy{82F9} 14|810b7 817r24 819r25
+558f7 Mean{float} 14|811b7 819r36
+559f7 Std_Dev{float} 561r19 14|812b7 815r10 819r44
+585V13*Compute_GRPO_Rewards{231R9} 586>7 587>7 588>7 589>7 590>7 591>7 592>7
+. 597r21 598r21 599r21 14|827b13
+586f7 Skip_Ratio{float} 594r21 595r21 14|828b7 840r10 840r30 842r69 850r10
+. 852r13
+587i7 Skip_Count{natural} 14|829b7 859r10
+588i7 Response_Len{natural} 14|830b7 866r10
+589f7 K_High{float} 596r29 14|831b7 845r34 850r24
+590f7 K_Low{float} 596r21 14|832b7 845r17 852r27
+591i7 Max_Skip{natural} 14|833b7 859r23
+592i7 Max_Length{natural} 14|834b7 866r25
+X 14 step_entropy.adb
+24N4 Epsilon 37r49 44r55 73r20 105r25
+27f4 Log_2_Base{float} 40r33
+30f4 Min_Threshold_Gap{float} 797r31 798r32
+36V13 Safe_Log{float} 36b13 36>23 36>34 46l8 46t16 106s47
+36f23 X{float} 37r46
+36f34 Base{float} 39r10 41r13 44r49
+37f7 Clamped{float} 40r22 42r22 44r22
+52V13 Softmax{13|111A9} 52b13 52>22 83l8 83t15 102s16 128s16
+52a22 Logits{13|111A9} 53r34 54r34 54r42 59r16 60r13 61r26 66r16 67r29 79r44
+53a7 Result{13|111A9} 68m10 74r19 75m13 75r27 79m10 82r14
+54f7 Max_Logit{float} 60r26 61m13 67r42
+55f7 Sum_Exp{float} 69m10 69r24 73r10 75r40
+56f7 Exp_Val{float} 67m10 68r24 69r34
+59i11 I{integer} 60r21 61r34
+66i11 I{integer} 67r37 68r18
+74i14 I{integer} 75r21 75r35
+94a7 Probs{13|111A9} 102m7 104r16 105r13 106r35 106r57
+95f7 Entropy{float} 106m13 106r24 110r40
+104i11 I{integer} 105r20 106r42 106r64
+119a7 Probs{13|111A9} 128m7 131r18 131r41 136r32
+120i7 Index{integer} 129m7 131r10 131r33 136r39
+155r7 Result{13|143R9} 172m7 173m7 174m7 175m7 176m7 177m7 197m10 224r36
+. 225m19 233m7 234m7 235m7 238r10 239m10 240r13 241m10 243m10 246r14
+156f7 Token_Ent_Val{13|82F9} 190m10 200r33 205r34 207r20 208r31
+157f7 Token_Prob{13|85F9} 193m10 201r33
+158f7 Total{float} 205m10 205r19 233r46 235r46
+159f7 Max_Val{float} 207r37 208m13 234r46
+160i7 Step_Text_Idx{positive} 224r19 225r37 227m19 227r36
+179i11 I{integer} 180r13 180r39 183r13 183r36 186r13 186r38 191r48 194r48
+. 195r42 197r34 198r62 199r66 202r33 214r49
+213a13 Token_Str{13|119A12} 217r22 218r19 219r41 226r22 226r33
+215i13 Last_Non_Space{natural} 219m19 223r27
+217i17 J{integer} 218r30 219r37
+223i17 J{integer} 226r51
+300r7 Result{13|160R9} 335m7 336m7 337m7 338m7 339m7 340m7 341m7 348m7 351r14
+301i7 Compressible_Count{natural} 319m13 319r35 336r38 342r42
+302i7 Informative_Count{natural} 323m13 323r34 337r38
+303i7 Low_Count{natural} 327m28 327r44 338r38
+304i7 Medium_Count{natural} 328m28 328r44 339r38
+305i7 High_Count{natural} 329m28 329r44 340r38
+306f7 Avg_Entropy_Sum{float} 332m10 332r29 349r25
+317i11 I{integer} 318r37 322r36 326r22 332r61
+364r7 Decision{13|177R9} 369m13 370m13 373m13 374m13 377m13 378m13 381m7
+. 382m7 383m7 384m7 386r14
+394U14 Batch_Route_Internal 394b14 395>7 396>7 397>7 398>7 399<7 421l8 421t28
+. 431s7
+395a7 Step_Entropies{13|112A9} 413r13 432r10
+396i7 Count{positive} 403r10 403r23 411r21 433r10
+397f7 Threshold_Low{13|82F9} 407r17 413r33 434r10
+398f7 Threshold_High{13|82F9} 407r42 413r48 435r10
+399a7 Decisions{13|115A9} 416m28 417m28 418m28 436r10
+401e7 Level{13|73E9} 412m10 415r15
+411i11 I{integer} 413r29 416r39 417r39 418r39
+429a7 Decisions{13|115A9} 436m28 438r14
+445R9 Indexed_Entropy 448e14 450r62 453r15 454r15 462r23
+446i7*Index{natural} 516m13 530r49
+447f7*Entropy{13|82F9} 457r19 457r35 517m13
+450A9 Indexed_Entropy_Array(445R9)<integer> 463r23 500r23
+452V13 Less_Indexed_Entropy{boolean} 452b13 453>7 454>7 458l8 458t28 464r23
+453r7 Left{445R9} 457r14
+454r7 Right{445R9} 457r29
+460U14 Sort_By_Entropy[4|23] 5|32b26 14|521s7
+480V13 Less_Natural{boolean} 480b13 480>27 480>33 483l8 483t20 489r23
+480i27 Left{natural} 482r14
+480i33 Right{natural} 482r21
+485U14 Natural_Index_Sort[4|23] 5|32b26 14|539s10
+500a7 Indexed_Steps{450A9} 515m10 521m24 521r24 530r31
+501i7 Num_To_Prune{natural} 523m7 525r10 526m10 529r21 533r16
+514i11 I{integer} 515r25 516r24 517r45
+529i11 I{integer} 530r25 530r46
+572i7 New_Pos{positive} 579m7 581r10 585r27 586r27 587r27 588r39
+616i7 Token_Count{natural} 622m7 625r48 626r51 627r53 628r28
+649r7 Result{13|196R9} 673m7 674m7 675m7 693m7 694m7 695m7 699m10 701m10
+. 710m13 711m13 713m13 718r56 723m16 723r41 728r14
+652f7 W_Mean{float} 683r30 684m13 684r24 685r30 693r30
+653f7 W_M2{float} 686m13 686r24 698r25
+654f7 W_Count{float} 682m13 682r24 684r42
+655f7 Delta1{float} 683m13 684r33 686r31
+655f15 Delta2{float} 685m13 686r40
+657f7 Min_E{float} 688r22 688m33 694r30 706r48 718r47
+658f7 Max_E{float} 689r22 689m33 695r30 706r40
+660f7 Variance{float} 698m10 699r45
+661i7 Bin_Idx{integer} 716m16 722m16 722r67 723r29 723r54
+678i11 I{integer} 680r55
+680f13 Val{float} 683r24 685r24 688r16 688r42 689r16 689r42
+706f10 Bin_Range{float} 708r13 713r33
+715i17 I{integer} 718r41
+758f7 Val{float} 764r30 767r30
+759f7 Delta1{float} 764m7 766r30 768r49
+760f7 Delta2{float} 767m7 768r58
+776f7 Variance{float} 786m7 787r36
+777f7 Std_Dev{float} 787m7 789r66 790r66
+778f7 Low_Val{float} 789m7 793m7 793r30 797r21 798r22 801r40
+779f7 High_Val{float} 790m7 794m7 794r30 797r10 798m10 802r40
+837r7 Result{13|231R9} 851m10 853m10 855m10 860m10 862m10 867m10 869m10 873m7
+. 874r10 874r32 874r52 876r14
+

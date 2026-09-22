@@ -1,0 +1,11 @@
+[2026-09-22T00:12:02.309087] == Template load start ==
+[2026-09-22T00:12:02.309219] missing og_jinja2_template.jinja2, og_jinja2_template.jinja
+[2026-09-22T00:12:02.309314] missing system_prompt.jinja2, system_prompt.md
+[2026-09-22T00:12:02.309386] missing tool_manifest.jinja2
+[2026-09-22T00:12:02.309472] missing channel_format.jinja2, channel_format.txt
+[2026-09-22T00:12:02.309540] missing reference_appendix.jinja2
+[2026-09-22T00:12:02.309606] missing tokenizer_profile.jinja2
+[2026-09-22T00:12:02.309670] missing message_metadata.md
+[2026-09-22T00:12:02.309733] missing jinja2_template.md
+[2026-09-22T00:12:02.309795] missing offline_reasoning_agent.md
+[2026-09-22T00:12:02.309847] == Template load end ==

@@ -1,7 +1,7 @@
 """
 system_router.py — Unified System Router
 =========================================
-Merges: neural_router.py + Garlic-Components/ + Ada Step Entropy
+Merges: neural_router.py + garlic-components/ + Ada Step Entropy
 
 Architecture: 13-stage forward pass
   Stage 0:  Context encoding
@@ -30,6 +30,7 @@ import os
 import sys
 import time as _time
 import logging
+import importlib.util as _importlib_util
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -50,21 +51,30 @@ _GarlicAdaStepEntropy = None
 _AdaptiveThresholdManager = None
 
 try:
-    _ada_bridge_dir = str(Path(__file__).resolve().parent / "ada_bridge")
-    if _ada_bridge_dir not in sys.path:
-        sys.path.insert(0, _ada_bridge_dir)
-    from ada_bridge import GarlicAdaStepEntropy as _GarlicAdaStepEntropy
-    from ada_bridge import AdaptiveThresholdManager as _AdaptiveThresholdManager
+    # ada_bridge.py is a single file at the Garlic project root (one level
+    # above src/), not a package under src/ — load it by absolute path to
+    # avoid both the wrong-location bug and any sys.path collision with an
+    # unrelated module also named ada_bridge.
+    _ada_bridge_path = Path(__file__).resolve().parent.parent / "ada_bridge.py"
+    _ada_bridge_spec = _importlib_util.spec_from_file_location(
+        "ada_bridge", str(_ada_bridge_path)
+    )
+    if _ada_bridge_spec is None or _ada_bridge_spec.loader is None:
+        raise ImportError(f"Could not build import spec for {_ada_bridge_path}")
+    _ada_bridge_mod = _importlib_util.module_from_spec(_ada_bridge_spec)
+    _ada_bridge_spec.loader.exec_module(_ada_bridge_mod)
+    _GarlicAdaStepEntropy = _ada_bridge_mod.GarlicAdaStepEntropy
+    _AdaptiveThresholdManager = _ada_bridge_mod.AdaptiveThresholdManager
     ADA_AVAILABLE = True
     logger.info("Ada Step Entropy bridge loaded (GNAT 13 native)")
 except Exception as _e:
     logger.info(f"Ada bridge unavailable ({_e}) — Python fallback active")
 
 # ============================================================================
-# Import Garlic-Components (working standalone modules)
+# Import garlic-components (working standalone modules)
 # ============================================================================
 
-_components_dir = str(Path(__file__).resolve().parent / "Garlic-Components")
+_components_dir = str(Path(__file__).resolve().parent / "garlic-components")
 if _components_dir not in sys.path:
     sys.path.insert(0, _components_dir)
 
@@ -73,7 +83,10 @@ from gnn_summary_extractor import GNNSummaryExtractor, SummaryExtractionConfig
 from hierarchical_query_processor import HierarchicalQueryProcessor, HierarchicalQueryConfig
 from reasoning_scaffolder_prod import ReasoningScaffolder, SemanticSignal
 from entropy_regularized_router import EntropyRegularizedRouter, RoutingDecision
-from garlic_injection_layer import GarlicInjectionLayer
+# NOTE: garlic_injection_layer does not exist as a separate module — memory
+# injection is inlined directly in SystemRouter.inject_memory_garlic_bridge()
+# below (garlic_bridge / signal_projection nn.Linear layers), per the
+# "Inlined from garlic_orchestrator.py:467-511" docstring on that method.
 
 # Import updated neural router components (post Phase 1 renames)
 _router_dir = str(Path(__file__).resolve().parent)
@@ -657,12 +670,27 @@ class SystemRouter(nn.Module):
     def _compress_hsgm(
         self, hidden_states: torch.Tensor
     ) -> Optional[torch.Tensor]:
-        """HSGM compression → [B, N_summary, D]."""
+        """HSGM compression → [B, N_summary, D].
+
+        hsgm_local_graph_builder / gnn_summary_extractor internally treat
+        their input as one flattened, unbatched sequence and return
+        node/summary embeddings as [N, D] (no leading batch dim). Every
+        caller of this method (Stage 10's graph_aligned construction,
+        inject_memory_garlic_bridge's graph_pooled construction) is written
+        against the documented [B, N_summary, D] contract — expand(batch, D)
+        broadcasts the same compressed summary across the real batch, which
+        is the correct behavior here since the underlying builder doesn't
+        discriminate per-batch-item internally anyway.
+        """
         if not self.config.enable_hsgm:
             return None
+        batch_size = hidden_states.shape[0]
         try:
             if self.config.use_multi_scale_graphs and hasattr(self, "multi_scale_builder"):
-                return self.multi_scale_builder(hidden_states)["medium"]
+                medium = self.multi_scale_builder(hidden_states)["medium"]
+                if medium.dim() == 2:
+                    medium = medium.unsqueeze(0).expand(batch_size, -1, -1)
+                return medium
             if hasattr(self, "local_graph_builder"):
                 local_graphs = self.local_graph_builder(hidden_states)
                 summary = self.summary_extractor(
@@ -670,7 +698,8 @@ class SystemRouter(nn.Module):
                     local_graphs["edge_index"],
                     local_graphs.get("edge_weights"),
                 )
-                return summary["summary_embeddings"]
+                summary_embeddings = summary["summary_embeddings"]
+                return summary_embeddings.unsqueeze(0).expand(batch_size, -1, -1)
         except Exception as e:
             logger.warning(f"HSGM compression failed: {e}")
         return None
@@ -799,14 +828,25 @@ class SystemRouter(nn.Module):
         ):
             try:
                 pooled = hidden_states.mean(dim=1)
-                signal_pred, signal_emb = self.reasoning_scaffolder.predict_and_embed(
+                signal, signal_emb, confidence = self.reasoning_scaffolder.predict_and_embed(
                     pooled
                 )
-                semantic_signals = signal_emb.unsqueeze(1).expand(
-                    -1, hidden_states.shape[1], -1
+                # predict_and_embed collapses the whole batch into ONE
+                # dominant signal per turn (SemanticSignalPredictor averages
+                # over the batch internally) and SignalEmbeddingLayer.forward
+                # returns a single embedding row — signal_emb is [D], not
+                # [B, D]. Broadcast that one signal across the batch and
+                # sequence, scaled by its calibrated confidence (low
+                # confidence injects weakly, high confidence strongly,
+                # mirroring how EntropyAwareInjectionController scales by
+                # entropy below).
+                seq_len = hidden_states.shape[1]
+                semantic_signals = (signal_emb * confidence).view(1, 1, -1).expand(
+                    batch_size, seq_len, -1
                 )
                 if trace is not None:
-                    trace["stage9_signal"] = signal_pred.signal.value if hasattr(signal_pred, "signal") else str(signal_pred)
+                    trace["stage9_signal"] = signal.value if hasattr(signal, "value") else str(signal)
+                    trace["stage9_confidence"] = confidence
             except Exception as e:
                 logger.debug(f"Semantic signal failed: {e}")
 
@@ -879,6 +919,98 @@ class SystemRouter(nn.Module):
         """Flush global memory at session end."""
         self.global_memory.flush()
         logger.info("Session ended — GlobalGraphMemory flushed")
+
+    def load_long_context(self, document: str, chunk_tokens: int = 512) -> Dict[str, Any]:
+        """Ingest a long document into GlobalGraphMemory via HSGM compression.
+
+        Chunks the document into `chunk_tokens`-word pieces, encodes each
+        chunk with a HashTextEncoder (no external LM required — the same
+        encoder class neural_router.py already provides), concatenates the
+        chunk embeddings into one long hidden-state sequence, compresses it
+        through the same local_graph_builder/summary_extractor pair Stage 2
+        of forward() uses, and stores the result as one turn in
+        global_memory.
+
+        Args:
+            document: Raw text to ingest.
+            chunk_tokens: Words per HashTextEncoder chunk — also becomes
+                that encoder's max_seq_len (each chunk is zero-padded to
+                exactly this length by HashTextEncoder's own forward()).
+
+        Returns:
+            Dict with real, measured stats: segments, summary_nodes, edges,
+            original_tokens, compressed_tokens, compression_ratio. Every
+            field is read off the actual tensors produced — no hardcoded
+            values. (No "entities" field: no entity-extraction concept
+            exists anywhere in this HSGM pipeline — segments/nodes/edges is
+            the whole vocabulary hsgm_local_graph_builder.py and
+            gnn_summary_extractor.py actually compute.)
+
+        Raises:
+            RuntimeError: if HSGM is disabled in this router's config —
+                there is nothing to ingest into without it.
+        """
+        if not self.config.enable_hsgm or not hasattr(self, "local_graph_builder"):
+            raise RuntimeError(
+                "load_long_context requires enable_hsgm=True and "
+                "use_multi_scale_graphs=False (multi-scale mode not yet "
+                "supported by this method)"
+            )
+
+        if not hasattr(self, "_doc_text_encoder"):
+            self._doc_text_encoder = HashTextEncoder(
+                vocab_buckets=50000,
+                embed_dim=self.config.context_dim,
+                num_hashes=4,
+                max_seq_len=chunk_tokens,
+                dropout=self.config.dropout,
+            ).to(self.tool_embeddings.device)
+
+        words = document.split()
+        chunks = [
+            " ".join(words[i:i + chunk_tokens])
+            for i in range(0, max(len(words), 1), chunk_tokens)
+        ] or [""]
+
+        with torch.no_grad():
+            chunk_embs = self._doc_text_encoder(chunks)  # [num_chunks, chunk_tokens, D]
+        hidden_states = chunk_embs.reshape(1, -1, self.config.context_dim)  # [1, S, D]
+
+        local_graphs = self.local_graph_builder(hidden_states)
+        summary = self.summary_extractor(
+            local_graphs["node_embeddings"],
+            local_graphs["edge_index"],
+            local_graphs.get("edge_weights"),
+        )
+        compressed_context = summary["summary_embeddings"]
+
+        original_tokens = hidden_states.shape[1]
+        compressed_tokens = (
+            compressed_context.shape[-2] if compressed_context.dim() >= 2 else 1
+        )
+        stats: Dict[str, Any] = {
+            "segments": len(local_graphs["segment_info"]),
+            "summary_nodes": compressed_tokens,
+            "edges": int(local_graphs["edge_index"].shape[1]),
+            "original_tokens": original_tokens,
+            "compressed_tokens": compressed_tokens,
+            "compression_ratio": float(original_tokens) / max(compressed_tokens, 1),
+        }
+
+        turn_graph = (
+            compressed_context
+            if compressed_context.dim() == 3
+            else compressed_context.unsqueeze(0)
+        )
+        self.global_memory.add_turn(
+            turn_graph,
+            entropy_value=0.0,  # no LM forward ran over this document — no
+                                 # token distribution exists yet to measure
+            model_slot=ModelSlot.SLOT_B,  # neutral default; document
+                                           # ingestion isn't a routed
+                                           # conversational turn
+        )
+        return stats
 
 
 # ============================================================================

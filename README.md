@@ -1,8 +1,8 @@
 # ADA-Step-Entropy: Kernel Integration & System Router Architecture
 
 **CLASSIFICATION:** UNCLASSIFIED // FOUO
-**STATUS:** ACTIVE // PRODUCTION DEPLOYMENT READY
-**DATE:** 2026-04-26
+**STATUS:** ACTIVE // Ada kernel + System Router core verified end-to-end (2026-09-22); LoRA-MoE stack and RLHF training pipeline are separate, less-hardened layers — see PLAN.md
+**DATE:** 2026-04-26 (last re-verified 2026-09-22)
 
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -39,15 +39,15 @@ This repository is designed for full autonomous interoperability with AI agents 
 ### 3.1 Kernel Parameters
 
 - **Core Language:** Ada 2022 (GNAT Pro 13.3.0)
-- **Mathematical Contracts:** Bounded array structures (`Max_Vocab_Size = 50,257`, `Max_Tokens_Per_Step = 512`)
+- **Mathematical Contracts:** Bounded array structures (`Max_Vocab_Size = 262,144`, `Max_Tokens_Per_Step = 512`)
 - **Numerical Stability:** Hardware-bound FP operations with log computation epsilon `1.0e-10`
 - **Output Artifacts:** `libgarlic_core.so` linking dynamically to `libgnat-13.so`
 
 ### 3.2 Bridging Subsystem
 
-- **FFI Layer:** Python `ctypes` bindings targeting exported C ABI (`step_entropy_c_api.so`)
-- **Runtime Target:** Python 3.12.3 in isolated virtual environment (`.venv`)
-- **Tensor Ops Integration:** NumPy 2.4.4 / PyTorch 2.11.0+cu130
+- **FFI Layer:** Python `ctypes` bindings targeting exported C ABI (15 single-underscore symbols in `libgarlic_core.so`, declared in `step_entropy_c_api.ads`)
+- **Runtime Target:** Python 3.14.4 in isolated virtual environment (`.venv`)
+- **Tensor Ops Integration:** NumPy / PyTorch 2.14.0+cu130 / transformers 5.17.0
 
 ### 3.3 Theoretical Grounding (arXiv:2508.03346)
 

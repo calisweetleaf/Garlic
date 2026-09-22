@@ -23,7 +23,7 @@ test-ada:
 
 ## test-router: Run the System-Router regression suite
 test-router:
-	$(PYTHON) -m pytest System-Router/tests/test_system_router.py -q
+	$(PYTHON) -m pytest src/tests/test_system_router.py -q
 
 ## clean: Remove build artifacts and cache directories
 clean:

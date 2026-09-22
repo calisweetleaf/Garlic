@@ -1,13 +1,18 @@
 """
 Garlic Architecture + Production RLHF Integration
 
-Source: /home/daeron/Projects/Garlic/garlic_gpt2_adapter.py (Garlic old)
-        /home/daeron/Projects/ADA-Step-Entropy/ada_bridge.py (Ada step entropy bridge for runtime import of compiled step_entropy)
+Source: src/system_router.py (SystemRouter — the real Garlic architecture)
+        ada_bridge.py (Ada step entropy bridge, Garlic project root)
+        rlhf-pipeline-cherry-revision/ (external production RLHF framework)
 Integrated: 2026-05-05
-Purpose: Wires GarlicGPT2 into the Full-RLHF-Pipeline production surface
-         (rlhf.py, inference_optimizations.py, inference_protocols.py,
-          telemetry.py, benchmark_harness.py) with Ada 2022 step entropy
-          as the routing/compression backbone.
+Rewired:    2026-09-22 — GarlicPolicyModel now wraps a real
+            AutoModelForCausalLM + SystemRouterWrapper (src/system_router.py)
+            instead of the removed GarlicGPT2 dependency, which does not
+            exist in this repo's architecture.
+Purpose: Wires the Garlic SystemRouter into the Full-RLHF-Pipeline
+         production surface (rlhf.py, inference_optimizations.py,
+         inference_protocols.py, telemetry.py, benchmark_harness.py) with
+         Ada 2022 step entropy as the routing/compression backbone.
 
 Architecture philosophy:
   Garlic lays the nail — structural routing/compression learning.
@@ -22,12 +27,16 @@ Ada step entropy (arXiv:2508.03346):
   - ADA_STEP_ENTROPY_AVAILABLE reflects live bridge status at import time
 
 Override env vars:
-  GARLIC_ROOT            path to garlic_gpt2_adapter.py directory
-  ADA_STEP_ENTROPY_ROOT  path to ada_bridge.py directory
+  ADA_STEP_ENTROPY_ROOT  path to ada_bridge.py's directory (Garlic project root)
+  GARLIC_SRC_ROOT        path to system_router.py's directory (Garlic/src)
+  RLHF_PIPELINE_ROOT     path to the rlhf-pipeline-cherry-revision checkout
 """
 
 from __future__ import annotations
 
+import contextlib
+import importlib
+import importlib.util as _importlib_util
 import logging
 import os as _os
 import sys
@@ -38,144 +47,232 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedTokenizer
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Portable path resolution — override via env vars for non-standard layouts
 # ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parent
+_REPO_ROOT = Path(__file__).resolve().parent  # .../Garlic/training
 
-_GARLIC_ROOT = _os.environ.get(
-    "GARLIC_ROOT",
-    str(_REPO_ROOT.parent / "Garlic"),
-)
-if _GARLIC_ROOT not in sys.path:
-    sys.path.insert(0, _GARLIC_ROOT)
-
-# Ada bridge is loaded via importlib by absolute path — NOT via sys.path —
-# to avoid shadowing Garlic's neural_router.py with the homonymous file in
-# ADA-Step-Entropy/System-Router/. sys.path manipulation for two projects
-# that share file names is a silent namespace collision waiting to happen.
+# ada_bridge.py lives at the Garlic project root itself (one level above
+# this file), not in a separate ADA-Step-Entropy checkout — that path does
+# not exist on this machine; the prior default was stale.
 _ADA_STEP_ENTROPY_ROOT = _os.environ.get(
     "ADA_STEP_ENTROPY_ROOT",
-    str(_REPO_ROOT.parent / "ADA-Step-Entropy"),
+    str(_REPO_ROOT.parent),
+)
+
+# system_router.py — the real Garlic architecture — lives in Garlic/src.
+_GARLIC_SRC_ROOT = _os.environ.get(
+    "GARLIC_SRC_ROOT",
+    str(_REPO_ROOT.parent / "src"),
+)
+
+# External production RLHF framework (rlhf.py + siblings) — a separate
+# project, not vendored into this repo.
+_RLHF_PIPELINE_ROOT = _os.environ.get(
+    "RLHF_PIPELINE_ROOT",
+    "/home/daeron/LAB/Experiments/projects/full-rlhf-pipeline/rlhf-pipeline-cherry-revision",
 )
 
 # ---------------------------------------------------------------------------
-# rlhf.py — the only canon RLHF runtime spine
+# External RLHF pipeline (rlhf.py + 5 siblings) — a separate project, not
+# vendored into this repo. Loaded via a *scoped* sys.path insertion (not a
+# permanent one) because rlhf.py and benchmark_harness.py use bare absolute
+# sibling imports (`from telemetry import ...`, `from model_merging import
+# ...`) that only resolve when the pipeline directory itself is importable
+# as a path root — per-file importlib.util.spec_from_file_location loading
+# (used below for system_router.py / ada_bridge.py, which are self-
+# contained) does not make those internal sibling imports resolve. Fails
+# loud — no fallback — if the directory or any module is missing.
 # ---------------------------------------------------------------------------
-from rlhf import (
-    # Orchestrator
-    RLHFOrchestrator,
-    # Infrastructure
-    DeviceManager,
-    CheckpointManager,
-    TrainingLogger,
-    EarlyStopping,
-    # Configs
-    BaseConfig,
-    SFTConfig,
-    RewardModelConfig,
-    DPOConfig,
-    GRPOConfig,
-    TreeGRPOConfig,
-    SimPOConfig,
-    KTOConfig,
-    PPOConfig,
-    # Models
-    PolicyModel,
-    RewardModel,
-    ProcessRewardModel,
-    ValueModel,
-    ContextCompressor,
-    # In-memory datasets
-    PreferenceDataset,
-    SFTDataset,
-    KTODataset,
-    GRPODataset,
-    # Streaming datasets (RAM-efficient, for JSONL)
-    StreamingPreferenceDataset,
-    StreamingSFTDataset,
-    StreamingKTODataset,
-    StreamingGRPODataset,
-    # Trainers
-    SFTTrainer,
-    DPOTrainer,
-    GRPOTrainer,
-    TreeGRPOTrainer,
-    SimPOTrainer,
-    KTOTrainer,
-    PPOTrainer,
-    # Self-improvement
-    AdversarialValidator,
-    CapabilityTester,
-    IterativeRefiner,
-    # Evaluation
-    RLHFEvaluator,
-    # Reward utilities
-    RewardFunctionFactory,
-    ConstitutionalRewardWrapper,
+
+_PIPELINE_MODULE_NAMES = (
+    "telemetry",                # leaf dependency of rlhf.py, benchmark_harness.py
+    "model_merging",            # leaf dependency of benchmark_harness.py
+    "inference_optimizations",  # leaf dependency of benchmark_harness.py
+    "inference_protocols",      # standalone (torch/stdlib only)
+    "rlhf",                     # depends on telemetry
+    "benchmark_harness",        # depends on model_merging, inference_optimizations, telemetry
 )
 
-# ---------------------------------------------------------------------------
-# Inference / search-time capabilities
-# ---------------------------------------------------------------------------
-from inference_protocols import PolicyAdapter, ProcessRewardModelAdapter
-from inference_optimizations import (
-    BestOfNConfig,
-    BestOfNSampler,
-    MCTSConfig,
-    MCTSGenerator,
-    ChainOfThoughtConfig,
-    ChainOfThoughtGenerator,
-    AStarConfig,
-    AStarGenerator,
-    TreeRolloutCollector,
-    RolloutSample,
-    compile_model,
-)
+
+@contextlib.contextmanager
+def _temporary_sys_path(path: str):
+    """Insert `path` at sys.path[0] for the duration of the block only."""
+    inserted = path not in sys.path
+    if inserted:
+        sys.path.insert(0, path)
+    try:
+        yield
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(path)
+            except ValueError:
+                pass
+
+
+def _load_rlhf_pipeline_modules() -> Dict[str, Any]:
+    """Import rlhf.py and its sibling modules from RLHF_PIPELINE_ROOT.
+
+    Returns:
+        Dict mapping module name -> loaded module object, for every name in
+        _PIPELINE_MODULE_NAMES.
+
+    Raises:
+        RuntimeError: if RLHF_PIPELINE_ROOT does not exist, or if any
+            required module fails to import.
+    """
+    root = Path(_RLHF_PIPELINE_ROOT)
+    if not root.is_dir():
+        raise RuntimeError(
+            f"RLHF_PIPELINE_ROOT does not exist: {root}. Set the "
+            "RLHF_PIPELINE_ROOT env var to the rlhf-pipeline-cherry-revision "
+            "checkout."
+        )
+    if not (root / "rlhf.py").exists():
+        raise RuntimeError(f"rlhf.py not found under RLHF_PIPELINE_ROOT: {root}")
+
+    loaded: Dict[str, Any] = {}
+    with _temporary_sys_path(str(root)):
+        for name in _PIPELINE_MODULE_NAMES:
+            try:
+                loaded[name] = importlib.import_module(name)
+            except ImportError as exc:
+                raise RuntimeError(
+                    f"Failed to import pipeline module '{name}' from {root}: {exc}"
+                ) from exc
+    return loaded
+
+
+_pipeline = _load_rlhf_pipeline_modules()
+rlhf = _pipeline["rlhf"]
+inference_protocols = _pipeline["inference_protocols"]
+inference_optimizations = _pipeline["inference_optimizations"]
+telemetry = _pipeline["telemetry"]
+benchmark_harness = _pipeline["benchmark_harness"]
+
+# Pulled off the module objects (not a second `from rlhf import (...)`
+# statement) so there is exactly one import path, governed by the scoped
+# sys.path block above.
+RLHFOrchestrator = rlhf.RLHFOrchestrator
+DeviceManager = rlhf.DeviceManager
+CheckpointManager = rlhf.CheckpointManager
+TrainingLogger = rlhf.TrainingLogger
+EarlyStopping = rlhf.EarlyStopping
+BaseConfig = rlhf.BaseConfig
+SFTConfig = rlhf.SFTConfig
+RewardModelConfig = rlhf.RewardModelConfig
+DPOConfig = rlhf.DPOConfig
+GRPOConfig = rlhf.GRPOConfig
+TreeGRPOConfig = rlhf.TreeGRPOConfig
+SimPOConfig = rlhf.SimPOConfig
+KTOConfig = rlhf.KTOConfig
+PPOConfig = rlhf.PPOConfig
+PolicyModel = rlhf.PolicyModel
+RewardModel = rlhf.RewardModel
+ProcessRewardModel = rlhf.ProcessRewardModel
+ValueModel = rlhf.ValueModel
+ContextCompressor = rlhf.ContextCompressor
+PreferenceDataset = rlhf.PreferenceDataset
+SFTDataset = rlhf.SFTDataset
+KTODataset = rlhf.KTODataset
+GRPODataset = rlhf.GRPODataset
+StreamingPreferenceDataset = rlhf.StreamingPreferenceDataset
+StreamingSFTDataset = rlhf.StreamingSFTDataset
+StreamingKTODataset = rlhf.StreamingKTODataset
+StreamingGRPODataset = rlhf.StreamingGRPODataset
+SFTTrainer = rlhf.SFTTrainer
+DPOTrainer = rlhf.DPOTrainer
+GRPOTrainer = rlhf.GRPOTrainer
+TreeGRPOTrainer = rlhf.TreeGRPOTrainer
+SimPOTrainer = rlhf.SimPOTrainer
+KTOTrainer = rlhf.KTOTrainer
+PPOTrainer = rlhf.PPOTrainer
+AdversarialValidator = rlhf.AdversarialValidator
+CapabilityTester = rlhf.CapabilityTester
+IterativeRefiner = rlhf.IterativeRefiner
+RLHFEvaluator = rlhf.RLHFEvaluator
+RewardFunctionFactory = rlhf.RewardFunctionFactory
+ConstitutionalRewardWrapper = rlhf.ConstitutionalRewardWrapper
+
+PolicyAdapter = inference_protocols.PolicyAdapter
+ProcessRewardModelAdapter = inference_protocols.ProcessRewardModelAdapter
+BestOfNConfig = inference_optimizations.BestOfNConfig
+BestOfNSampler = inference_optimizations.BestOfNSampler
+MCTSConfig = inference_optimizations.MCTSConfig
+MCTSGenerator = inference_optimizations.MCTSGenerator
+ChainOfThoughtConfig = inference_optimizations.ChainOfThoughtConfig
+ChainOfThoughtGenerator = inference_optimizations.ChainOfThoughtGenerator
+AStarConfig = inference_optimizations.AStarConfig
+AStarGenerator = inference_optimizations.AStarGenerator
+TreeRolloutCollector = inference_optimizations.TreeRolloutCollector
+RolloutSample = inference_optimizations.RolloutSample
+compile_model = inference_optimizations.compile_model
+TelemetryRecorder = telemetry.TelemetryRecorder
+BenchmarkHarness = benchmark_harness.BenchmarkHarness
 
 # ---------------------------------------------------------------------------
-# Observability
+# Garlic architecture — SystemRouter (src/system_router.py). Loaded by
+# absolute path; the module resolves its own internal imports (neural_router,
+# garlic-components/) relative to its own __file__, so no sys.path insertion
+# is needed here. Unconditional / fails loud — SystemRouter is the real
+# Garlic architecture, not an optional component.
 # ---------------------------------------------------------------------------
-from telemetry import TelemetryRecorder
-from benchmark_harness import BenchmarkHarness
+
+
+def _load_system_router_module() -> Any:
+    candidate = Path(_GARLIC_SRC_ROOT) / "system_router.py"
+    if not candidate.exists():
+        raise RuntimeError(f"system_router.py not found at {candidate}")
+    spec = _importlib_util.spec_from_file_location(
+        "garlic_system_router", str(candidate)
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not build import spec for {candidate}")
+    mod = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_system_router_mod = _load_system_router_module()
+SystemRouter = _system_router_mod.SystemRouter
+SystemRouterConfig = _system_router_mod.SystemRouterConfig
+SystemRouterWrapper = _system_router_mod.SystemRouterWrapper
+ModelSlot = _system_router_mod.ModelSlot
+SystemOutput = _system_router_mod.SystemOutput
+SYSTEM_ROUTER_ADA_AVAILABLE: bool = _system_router_mod.ADA_AVAILABLE
 
 # ---------------------------------------------------------------------------
-# Garlic architecture
+# Ada 2022 step entropy bridge (arXiv:2508.03346) — repo-root ada_bridge.py.
+# Loaded via importlib by absolute path to avoid any sys.path collision.
+# Used directly by GarlicRewardModel for GRPO reward computation; SystemRouter
+# above loads its own separate instance internally for routing decisions.
 # ---------------------------------------------------------------------------
-from garlic_gpt2_adapter import GarlicGPT2
-
-# ---------------------------------------------------------------------------
-# Ada 2022 step entropy bridge (arXiv:2508.03346)
-#
-# Loaded via importlib by absolute path — NOT via sys.path — to prevent
-# ADA-Step-Entropy's neural_router.py from shadowing Garlic's copy.
-# Falls back gracefully: routing still functions via garlic_output keys.
-# ---------------------------------------------------------------------------
-import importlib.util as _importlib_util
 
 
 def _load_ada_bridge_module() -> Optional[Any]:
-    """Load ada_bridge.py by absolute path to avoid sys.path conflicts.
+    """Load ada_bridge.py by absolute path.
 
     Returns:
         Loaded module object, or None if not found or failed to load.
     """
-    candidates = [
-        Path(_ADA_STEP_ENTROPY_ROOT) / "ada_bridge.py",
-        Path(_REPO_ROOT.parent / "ADA-Step-Entropy" / "ada_bridge.py"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            spec = _importlib_util.spec_from_file_location("ada_bridge", str(candidate))
-            if spec is None or spec.loader is None:
-                continue
-            mod = _importlib_util.module_from_spec(spec)
-            try:
-                spec.loader.exec_module(mod)  # type: ignore[union-attr]
-                return mod
-            except Exception as _exc:
-                continue  # try next candidate
-    return None
+    candidate = Path(_ADA_STEP_ENTROPY_ROOT) / "ada_bridge.py"
+    if not candidate.exists():
+        logger.warning("ada_bridge.py not found at %s", candidate)
+        return None
+    spec = _importlib_util.spec_from_file_location("ada_bridge", str(candidate))
+    if spec is None or spec.loader is None:
+        return None
+    mod = _importlib_util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+    except Exception as exc:
+        logger.warning("Failed to load ada_bridge.py: %s", exc)
+        return None
 
 
 _ada_bridge_mod = _load_ada_bridge_module()
@@ -195,15 +292,15 @@ else:
     GRPORewardsData = None  # type: ignore[assignment,misc]
     ADA_STEP_ENTROPY_AVAILABLE = False
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 if ADA_STEP_ENTROPY_AVAILABLE:
     logger.info("Ada step entropy bridge: LIVE (Max_Vocab_Size=262144)")
 else:
-    logger.warning(
-        "Ada step entropy bridge: UNAVAILABLE — routing via garlic_output only"
-    )
+    logger.warning("Ada step entropy bridge: UNAVAILABLE — GRPO compression reward disabled")
+
+if SYSTEM_ROUTER_ADA_AVAILABLE:
+    logger.info("SystemRouter Ada step entropy: LIVE")
+else:
+    logger.warning("SystemRouter Ada step entropy: Python fallback active")
 
 
 # ---------------------------------------------------------------------------
@@ -236,82 +333,140 @@ def _sync_default_telemetry_recorder(recorder: TelemetryRecorder) -> None:
 # ============================================================================
 
 
-class GarlicPolicyModel(PolicyModel):
-    """PolicyModel wrapper over GarlicGPT2 for production RLHF training.
+def _resolve_hidden_size(cfg: Any) -> int:
+    """Resolve a HF config's hidden size across architecture families.
 
-    Source: garlic_gpt2_adapter.GarlicGPT2 (Garlic project)
+    RewardModel's own _resolve_hidden_size (rlhf.py) only checks
+    hidden_size/text_config/language_config, which misses GPT-2-family
+    configs that expose n_embd instead. This checks the wider set actually
+    seen across causal-LM configs.
+    """
+    for attr in ("hidden_size", "n_embd", "d_model", "hidden_dim"):
+        val = getattr(cfg, attr, None)
+        if val is not None:
+            return int(val)
+    for sub in ("text_config", "language_config"):
+        subcfg = getattr(cfg, sub, None)
+        if subcfg is not None:
+            for attr in ("hidden_size", "n_embd", "d_model"):
+                val = getattr(subcfg, attr, None)
+                if val is not None:
+                    return int(val)
+    raise ValueError(f"Cannot resolve hidden size from config {cfg!r}")
+
+
+class GarlicPolicyModel(PolicyModel):
+    """PolicyModel wrapper over a real causal LM + SystemRouter.
+
+    Source: rlhf.PolicyModel (base), src/system_router.py (SystemRouter)
     Integrated: 2026-05-05
-    Purpose: Presents the Garlic orchestration layer as a PolicyModel so
-             all rlhf.py trainers (SFT, DPO, GRPO, TreeGRPO, PPO, …) can
-             drive it without knowing about Garlic internals.
+    Rewired:    2026-09-22 — wraps a genuine AutoModelForCausalLM (via the
+                real PolicyModel.__init__) plus SystemRouterWrapper, in
+                place of the removed GarlicGPT2 dependency (that class does
+                not exist in this repo's architecture).
+    Purpose: Presents Garlic's SystemRouter as a PolicyModel so all rlhf.py
+             trainers (SFT, DPO, GRPO, TreeGRPO, PPO, …) can drive it
+             without knowing about SystemRouter internals.
 
     Design notes:
-      - Calls nn.Module.__init__ directly instead of PolicyModel.__init__
-        because PolicyModel.__init__ downloads and instantiates a fresh base
-        model from HuggingFace. GarlicGPT2 is already instantiated; re-
-        loading would waste memory and break the orchestrator wiring.
-      - Ada step entropy (if available) runs on the last-token logits of each
-        forward pass and stores routing metadata in _last_routing for
-        GarlicRewardModel to consume without a redundant forward call.
+      - SystemRouter does not itself run a language model — it CONSUMES
+        hidden_states/logits (computed here by the real base LM) and
+        produces a routing decision, HSGM compression, and (optionally)
+        memory-augmented hidden states. This wrapper is the seam between
+        the two: real LM forward -> SystemRouterWrapper.route() -> logit
+        correction from augmented_states (if any) -> loss.
+      - SystemRouter owns its own step-entropy engine internally
+        (build_step_entropy(), Ada or Python fallback); this wrapper does
+        not duplicate a second entropy engine.
     """
 
     def __init__(
         self,
-        garlic_model: GarlicGPT2,
+        base_model_name: str,
         tokenizer: PreTrainedTokenizer,
+        router_config: Optional[Any] = None,
         freeze_base_model: bool = False,
+        use_gradient_checkpointing: bool = False,
+        **policy_model_kwargs: Any,
     ) -> None:
         """Initialize the Garlic policy model wrapper.
 
         Args:
-            garlic_model: Fully initialized GarlicGPT2 instance.
+            base_model_name: HuggingFace model identifier or local path.
             tokenizer: Tokenizer matching the base model.
+            router_config: SystemRouterConfig to use. Built from the base
+                model's real hidden size if None.
             freeze_base_model: If True, freeze base model weights so only
-                the Garlic orchestrator trains. Default False (both train).
+                the SystemRouter trains. Default False (both train).
+            use_gradient_checkpointing: Forwarded to PolicyModel.__init__.
+            **policy_model_kwargs: Forwarded to PolicyModel.__init__
+                (load_in_4bit, attn_implementation, etc.).
         """
-        # Intentional bypass — see class docstring for rationale.
-        nn.Module.__init__(self)
+        super().__init__(
+            base_model_name,
+            use_gradient_checkpointing=use_gradient_checkpointing,
+            **policy_model_kwargs,
+        )
 
-        self.garlic_model: GarlicGPT2 = garlic_model
         self.tokenizer: PreTrainedTokenizer = tokenizer
         self.freeze_base_model: bool = freeze_base_model
 
-        # Expose config and base model at the PolicyModel expected surface.
-        self.model = garlic_model.base_model
-        self.config = garlic_model.config
-
-        # Freeze / unfreeze base model weights.
         base_params = 0
-        for param in garlic_model.base_model.parameters():
+        for param in self.model.parameters():
             param.requires_grad = not freeze_base_model
             base_params += param.numel()
 
-        # Garlic orchestrator is always trainable.
-        garlic_params = sum(
-            p.numel()
-            for p in garlic_model.orchestrator.parameters()
-            if hasattr(garlic_model, "orchestrator")
+        hidden_size = _resolve_hidden_size(self.model.config)
+        self._router_config = router_config or SystemRouterConfig(
+            context_dim=hidden_size
         )
-        for param in garlic_model.orchestrator.parameters():
-            param.requires_grad = True
+        if self._router_config.context_dim != hidden_size:
+            raise ValueError(
+                f"router_config.context_dim ({self._router_config.context_dim}) "
+                f"must equal the base model's hidden size ({hidden_size})"
+            )
 
-        trainable_total = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        self.system_router: Any = SystemRouterWrapper(self._router_config)
 
-        # Ada entropy bridge (per-instance, not shared across workers).
-        self._ada_entropy: Optional[Any] = (
-            GarlicAdaStepEntropy() if ADA_STEP_ENTROPY_AVAILABLE else None
-        )
+        router_params = 0
+        if self.system_router.router is not None:
+            # SystemRouterWrapper is a plain Python class, not an nn.Module,
+            # so assigning it above does NOT auto-register its wrapped
+            # SystemRouter (which IS an nn.Module) with PyTorch's parameter
+            # tracking — self.parameters() would silently skip all of its
+            # weights (context_encoder, slot_predictor, entropy_router,
+            # etc.), breaking optimizer construction, .to(device), and
+            # state_dict() for anything walking self.parameters()/.modules().
+            # add_module() registers the *same* object under self._modules
+            # so it's tracked, while self.system_router.route(...) still
+            # operates on that identical instance.
+            self.add_module("_system_router_module", self.system_router.router)
+            router_params = sum(
+                p.numel() for p in self.system_router.router.parameters()
+            )
+            for param in self.system_router.router.parameters():
+                param.requires_grad = True
 
         # Last forward routing metadata — read by GarlicRewardModel.
         self._last_routing: Dict[str, Any] = {}
+        # Set externally by GarlicRLHFSystem when a Welford threshold
+        # manager is active.
+        self._threshold_manager: Optional[Any] = None
+
+        trainable_total = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
         logger.info("GarlicPolicyModel initialized")
         status = "FROZEN" if freeze_base_model else "TRAINABLE"
-        logger.info("  base_model params : %d (%s)", base_params, status)
-        logger.info("  orchestrator params: %d (TRAINABLE)", garlic_params)
-        logger.info("  total trainable   : %d", trainable_total)
+        logger.info("  base_model params  : %d (%s)", base_params, status)
+        logger.info("  system_router params: %d (TRAINABLE)", router_params)
+        logger.info("  total trainable    : %d", trainable_total)
         logger.info(
-            "  Ada step entropy  : %s", "LIVE" if self._ada_entropy else "FALLBACK"
+            "  SystemRouter       : %s",
+            "LIVE" if self.system_router.router is not None else "JINJA2_FALLBACK",
+        )
+        logger.info(
+            "  Ada step entropy   : %s",
+            "LIVE" if SYSTEM_ROUTER_ADA_AVAILABLE else "PYTHON_FALLBACK",
         )
 
     # ------------------------------------------------------------------
@@ -323,106 +478,127 @@ class GarlicPolicyModel(PolicyModel):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
+        user_profile: Optional[torch.Tensor] = None,
+        metadata: Optional[torch.Tensor] = None,
+        context_metadata: Optional[Dict[str, Any]] = None,
         use_garlic: bool = True,
-        output_hidden_states: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Forward pass through GarlicGPT2 with optional Ada entropy routing.
+        """Forward pass: real LM -> SystemRouter routing -> loss.
 
         Args:
             input_ids: Token IDs [batch, seq_len].
             attention_mask: Padding mask [batch, seq_len].
             labels: Target IDs for loss computation [batch, seq_len].
-            use_garlic: Route through Garlic orchestration when True.
-            output_hidden_states: If True, also return the final hidden
-                states from the base model (costs an extra forward call).
+            user_profile: [batch, 128] profile features, or None for a
+                documented zero-signal default (no per-example profile
+                data flows through the standard RLHF trainers today).
+            metadata: [batch, 64] metadata features, or None for the same
+                zero-signal default.
+            context_metadata: Passed through to SystemRouter.route().
+            use_garlic: If False, skip SystemRouter entirely and return
+                the raw base-LM forward pass (a real, meaningful toggle —
+                e.g. for baseline comparisons against the routed path).
 
         Returns:
-            Dict with keys:
-              loss          – CrossEntropy loss if labels provided else None
-              logits        – [batch, seq_len, vocab]
-              hidden_states – [batch, seq_len, hidden] or None
-              step_entropy  – float (Ada avg entropy in bits) or None
-              routing_path  – str ('fast'|'normal'|'slow') or garlic path
-              compression_ratio – float or None
+            Dict with keys: loss, logits, hidden_states, step_entropy,
+            routing_path, compression_ratio, system_output (the full
+            SystemOutput, or None when use_garlic=False).
         """
         if attention_mask is not None and attention_mask.dtype == torch.int64:
             attention_mask = attention_mask.float()
 
-        garlic_out = self.garlic_model.forward(
-            input_ids,
+        base_out = self.model(
+            input_ids=input_ids,
             attention_mask=attention_mask,
-            use_garlic=use_garlic,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        base_logits: torch.Tensor = base_out.logits
+        base_hidden: torch.Tensor = base_out.hidden_states[-1]
+
+        if not use_garlic:
+            loss = self._compute_loss(base_logits, labels)
+            self._last_routing = {}
+            return {
+                "loss": loss,
+                "logits": base_logits,
+                "hidden_states": base_hidden,
+                "step_entropy": None,
+                "routing_path": None,
+                "compression_ratio": None,
+                "system_output": None,
+            }
+
+        batch_size = input_ids.shape[0]
+        device = input_ids.device
+        if user_profile is None:
+            user_profile = torch.zeros(batch_size, 128, device=device)
+        if metadata is None:
+            metadata = torch.zeros(batch_size, 64, device=device)
+        context_metadata = context_metadata or {}
+
+        system_output: Any = self.system_router.route(
+            message_embs=base_hidden,
+            user_profile=user_profile,
+            metadata=metadata,
+            context_metadata=context_metadata,
+            hidden_states=base_hidden,
+            logits=base_logits,
             return_trace=False,
         )
 
-        logits: torch.Tensor = garlic_out["logits"]
-        routing_path: str = garlic_out.get("routing_path", "unknown")
-        compression_ratio: Optional[float] = garlic_out.get("compression_ratio")
+        final_logits = base_logits
+        if system_output.augmented_states is not None:
+            aug = system_output.augmented_states
+            prefix_len = aug.shape[1] - base_hidden.shape[1]
+            if prefix_len > 0:
+                aug = aug[:, prefix_len:, :]
+            final_logits = self.model.lm_head(aug)
 
-        # --- Ada step entropy on last-token logits ---
-        step_entropy: Optional[float] = None
-        if self._ada_entropy is not None and logits is not None:
-            try:
-                import numpy as _np
+        loss = self._compute_loss(final_logits, labels)
 
-                last_logits_np = (
-                    logits[0, -1, :].detach().cpu().numpy().astype(_np.float32)
-                )
-                step_data = self._ada_entropy.calculate_step_entropy(
-                    token_logits=[last_logits_np],
-                    token_ids=[0],
-                    token_texts=[""],
-                )
-                step_entropy = step_data.avg_entropy
-                routing_path = step_data.level.name.lower()
+        original_tokens = system_output.original_tokens or input_ids.shape[1]
+        compressed_tokens = system_output.compressed_tokens or original_tokens
+        # Bounded [0,1) skip fraction — NOT the raw HSGM N:1 compression_ratio,
+        # which would miscalibrate compute_grpo_rewards' skip_ratio in [0,1] contract.
+        skip_ratio = 1.0 - (compressed_tokens / max(original_tokens, 1))
 
-                # Update Welford thresholds if a manager is available.
-                atm: Optional[Any] = getattr(self, "_threshold_manager", None)
-                if atm is not None:
-                    atm.update(step_entropy)
-            except Exception as _exc:
-                logger.debug("Ada entropy failed on forward: %s", _exc)
-
-        # Persist routing metadata for GarlicRewardModel (no extra forward needed).
         self._last_routing = {
-            "routing_path": routing_path,
-            "compression_ratio": compression_ratio
-            if compression_ratio is not None
-            else 0.0,
-            "step_entropy": step_entropy,
-            "seq_len": input_ids.shape[1],
+            "routing_path": system_output.entropy_level or "unknown",
+            "model_slot": system_output.model_slot.name,
+            "compression_ratio": skip_ratio,
+            "hsgm_compression_ratio": system_output.compression_ratio,
+            "step_entropy": system_output.entropy_value,
+            "seq_len": original_tokens,
+            "augmented": system_output.augmented_states is not None,
         }
 
-        # --- Optional hidden states (extra base-model forward, output_hs=True) ---
-        hidden_states: Optional[torch.Tensor] = None
-        if output_hidden_states:
-            with torch.no_grad():
-                base_out = self.garlic_model.base_model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_hidden_states=True,
-                )
-            hidden_states = base_out.hidden_states[-1]
-
-        # --- Loss ---
-        loss: Optional[torch.Tensor] = None
-        if labels is not None:
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss = nn.CrossEntropyLoss()(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-            )
+        if self._threshold_manager is not None and system_output.entropy_value:
+            self._threshold_manager.update(system_output.entropy_value)
 
         return {
             "loss": loss,
-            "logits": logits,
-            "hidden_states": hidden_states,
-            "step_entropy": step_entropy,
-            "routing_path": routing_path,
-            "compression_ratio": compression_ratio,
+            "logits": final_logits,
+            "hidden_states": base_hidden,
+            "step_entropy": system_output.entropy_value,
+            "routing_path": system_output.entropy_level,
+            "compression_ratio": skip_ratio,
+            "system_output": system_output,
         }
+
+    @staticmethod
+    def _compute_loss(
+        logits: torch.Tensor, labels: Optional[torch.Tensor]
+    ) -> Optional[torch.Tensor]:
+        if labels is None:
+            return None
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        return nn.CrossEntropyLoss()(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+        )
 
     # ------------------------------------------------------------------
     # Generate
@@ -431,65 +607,84 @@ class GarlicPolicyModel(PolicyModel):
     def generate(
         self,
         input_ids: torch.Tensor,
-        max_length: int = 100,
+        attention_mask: Optional[torch.Tensor] = None,
+        max_new_tokens: int = 100,
         temperature: float = 1.0,
         top_k: int = 50,
         top_p: float = 0.95,
+        do_sample: bool = True,
         use_garlic: bool = True,
         **kwargs: Any,
     ) -> torch.Tensor:
-        """Generate with Garlic orchestration, returning a token ID tensor.
+        """Generate token IDs, with a real routing pass for telemetry.
 
-        GarlicGPT2.generate() takes a text string, not token IDs, so we
-        decode first then re-encode. This maintains the PolicyModel interface.
+        Runs one no-grad forward() pass first (when use_garlic=True) purely
+        to populate _last_routing / emit a routing decision — real work,
+        not a stub. Actual decoding is delegated entirely to the base
+        model's own complete HF generate() implementation; per-step Garlic
+        injection during autoregressive decoding is out of scope (would
+        need a custom LogitsProcessor re-running SystemRouter every N
+        tokens — a real design with its own tradeoffs, not decided here).
 
         Args:
-            input_ids: Prompt token IDs [1, seq_len] (batch size 1 required).
-            max_length: Maximum total generation length.
+            input_ids: Prompt token IDs [batch, seq_len].
+            attention_mask: Padding mask [batch, seq_len].
+            max_new_tokens: Maximum number of new tokens to generate.
             temperature: Sampling temperature.
             top_k: Top-K sampling parameter.
             top_p: Nucleus sampling threshold.
-            use_garlic: Route through Garlic orchestration when True.
+            do_sample: Whether to sample (vs. greedy decoding).
+            use_garlic: Route through SystemRouter for telemetry when True.
 
         Returns:
-            Generated token ID tensor [1, total_len].
+            Generated token ID tensor [batch, seq_len + new_tokens].
         """
-        prompt = self.tokenizer.decode(input_ids[0], skip_special_tokens=True)
+        if use_garlic:
+            with torch.no_grad():
+                self.forward(input_ids, attention_mask=attention_mask, use_garlic=True)
 
-        results: List[Dict[str, Any]] = self.garlic_model.generate(
-            input_text=prompt,
-            max_length=max_length,
+        pad_token_id = self.model.config.eos_token_id
+        return self.model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
             temperature=temperature,
+            top_k=top_k,
             top_p=top_p,
-            use_garlic=use_garlic,
+            do_sample=do_sample,
+            pad_token_id=pad_token_id,
+            **kwargs,
         )
-
-        generated_text: str = results[0].get("text", prompt) if results else prompt
-        generated_ids = self.tokenizer.encode(generated_text, return_tensors="pt")
-        return generated_ids.to(input_ids.device)
 
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
     def save_model(self, save_path: str) -> None:
-        """Save base model weights, tokenizer, and Garlic orchestrator state.
+        """Save base model weights, tokenizer, and full SystemRouter state.
 
         Args:
             save_path: Directory path. Created if it does not exist.
         """
-        import os
+        _os.makedirs(save_path, exist_ok=True)
 
-        os.makedirs(save_path, exist_ok=True)
-
-        self.garlic_model.base_model.save_pretrained(save_path)
+        self.model.save_pretrained(save_path)
         self.tokenizer.save_pretrained(save_path)
 
-        garlic_state: Dict[str, Any] = {
-            "orchestrator": self.garlic_model.orchestrator.state_dict(),
-            "injection_layer": self.garlic_model.injection_layer,
-        }
-        torch.save(garlic_state, os.path.join(save_path, "garlic_components.pt"))
+        if self.system_router.router is not None:
+            # Full state_dict, not just the two named bridge layers —
+            # SystemRouter has many more trainable submodules (context_encoder,
+            # slot_predictor, entropy_router, difficulty_allocator, ...) that
+            # accumulate gradient during GRPO/reward training.
+            torch.save(
+                self.system_router.router.state_dict(),
+                _os.path.join(save_path, "system_router.pt"),
+            )
+        else:
+            logger.warning(
+                "SystemRouter unavailable (Jinja2 fallback active) — "
+                "system_router.pt not saved; only base LM weights persisted."
+            )
         logger.info("GarlicPolicyModel saved to %s", save_path)
 
     # ------------------------------------------------------------------
@@ -497,20 +692,19 @@ class GarlicPolicyModel(PolicyModel):
     # ------------------------------------------------------------------
 
     def get_garlic_statistics(self) -> Dict[str, Any]:
-        """Return Garlic orchestration statistics for the current session.
+        """Return Garlic routing statistics for the current session.
 
         Returns:
-            Dict with routing and memory stats from the Garlic orchestrator.
+            Dict with routing metadata from the last forward() call, plus
+            global-memory turn count and adaptive thresholds when available.
         """
         stats: Dict[str, Any] = dict(self._last_routing)
 
-        orchestrator = self.garlic_model.orchestrator
-        if hasattr(orchestrator, "get_stats"):
-            stats.update(orchestrator.get_stats())
-        elif hasattr(orchestrator, "get_statistics"):
-            stats.update(orchestrator.get_statistics())
+        router = self.system_router.router
+        if router is not None:
+            stats["global_memory_turns"] = router.global_memory.turn_count
+            stats["global_memory_empty"] = router.global_memory.is_empty
 
-        # Adaptive thresholds if Welford manager is present.
         atm: Optional[Any] = getattr(self, "_threshold_manager", None)
         if atm is not None:
             try:
@@ -528,11 +722,19 @@ class GarlicPolicyModel(PolicyModel):
 # ============================================================================
 
 
-class GarlicRewardModel(RewardModel):
+class GarlicRewardModel(nn.Module):
     """Lean reward model for Garlic's structural training stage.
 
-    Source: garlic_gpt2_adapter.GarlicGPT2, ada_bridge.AdaStepEntropy
+    Source: rlhf.RewardModel (wrapped, not subclassed), ada_bridge.AdaStepEntropy
     Integrated: 2026-05-05
+    Rewired:    2026-09-22 — changed from subclassing RewardModel to
+                *wrapping* an already-built RewardModel instance. The real
+                RewardModel.__init__ takes a base_model_name: str (it builds
+                its own AutoModel backbone internally) — the original call
+                site passed an already-built nn.Module into that slot, which
+                raises. Composition over an existing RewardModel sidesteps
+                the constructor-arg mismatch entirely while keeping the same
+                forward() delegation.
     Purpose: Combines base sequence quality reward with Ada GRPO compression
              signal (arXiv:2508.03346 Eq.13-15). Kept deliberately lean —
              quality alignment is Cherry's PRM responsibility, not Garlic's.
@@ -546,7 +748,7 @@ class GarlicRewardModel(RewardModel):
 
     def __init__(
         self,
-        base_model: nn.Module,
+        base_reward_model: Any,
         garlic_policy: GarlicPolicyModel,
         alpha_base: float = 0.85,
         alpha_compression: float = 0.15,
@@ -554,20 +756,21 @@ class GarlicRewardModel(RewardModel):
         """Initialize the Garlic reward model.
 
         Args:
-            base_model: Pre-trained model for the base reward head.
+            base_reward_model: An already-built RewardModel instance (e.g.
+                self.reward_models[0] from RLHFOrchestrator.run_reward_model_training).
             garlic_policy: GarlicPolicyModel whose _last_routing carries
                 routing metadata from the most recent forward pass.
             alpha_base: Weight for the base quality reward. Default 0.85.
             alpha_compression: Weight for the Ada GRPO compression reward.
                 Default 0.15. Must satisfy alpha_base + alpha_compression == 1.
         """
-        super().__init__(base_model)
+        super().__init__()
 
+        self.base_reward_model = base_reward_model
         self.garlic_policy: GarlicPolicyModel = garlic_policy
         self.alpha_base: float = alpha_base
         self.alpha_compression: float = alpha_compression
 
-        # Reuse policy Ada bridge instance if live; otherwise None.
         self._ada: Optional[Any] = (
             AdaStepEntropy if ADA_STEP_ENTROPY_AVAILABLE else None
         )
@@ -595,7 +798,7 @@ class GarlicRewardModel(RewardModel):
         Returns:
             Scalar reward tensor [batch].
         """
-        base_reward: torch.Tensor = super().forward(input_ids, attention_mask)
+        base_reward: torch.Tensor = self.base_reward_model(input_ids, attention_mask)
 
         compression_signal = torch.zeros(base_reward.shape, device=input_ids.device)
 
@@ -661,11 +864,6 @@ class GarlicRLHFSystem(RLHFOrchestrator):
             use_self_improvement: Pass-through to RLHFOrchestrator.
             **kwargs: Additional kwargs forwarded to RLHFOrchestrator.
         """
-        # Build GarlicGPT2 before parent init so self.garlic_gpt2 is ready
-        # when we override self.policy_model below.
-        logger.info("Building GarlicGPT2: %s", base_model)
-        self.garlic_gpt2: GarlicGPT2 = GarlicGPT2(base_model)
-
         super().__init__(
             base_model=base_model,
             output_dir=output_dir,
@@ -673,9 +871,10 @@ class GarlicRLHFSystem(RLHFOrchestrator):
             **kwargs,
         )
 
-        # Replace parent's policy model with our Garlic wrapper.
+        # Replace parent's policy model with our Garlic wrapper. self.tokenizer
+        # is set by RLHFOrchestrator.__init__ just above (AutoTokenizer.from_pretrained).
         self.garlic_policy: GarlicPolicyModel = GarlicPolicyModel(
-            self.garlic_gpt2, self.tokenizer
+            base_model, self.tokenizer, freeze_base_model=False,
         )
         self.policy_model = self.garlic_policy
 
@@ -777,34 +976,32 @@ class GarlicRLHFSystem(RLHFOrchestrator):
     # ------------------------------------------------------------------
 
     def load_long_context(self, document: str) -> Dict[str, Any]:
-        """Load a long document into the Garlic orchestrator's HSGM memory.
+        """Load a long document into SystemRouter's HSGM memory.
 
-        Delegates to garlic_gpt2.orchestrator.load_long_context() if the
-        orchestrator supports it, otherwise returns a stub summary.
+        Thin delegation to SystemRouter.load_long_context() (src/system_router.py),
+        which owns the real HSGM ingestion pipeline (global_memory,
+        local_graph_builder, summary_extractor). Raises loud if the router
+        is in its documented Jinja2-fallback state rather than returning
+        fabricated stats.
 
         Args:
             document: Raw text to compress and store.
 
         Returns:
-            Dict with memory stats (segments, compression_ratio, entities).
+            Dict with real memory stats (segments, summary_nodes, edges,
+            original_tokens, compressed_tokens, compression_ratio).
         """
         logger.info("Loading long context (%d chars) into HSGM", len(document))
-        orchestrator = self.garlic_gpt2.orchestrator
-
-        if hasattr(orchestrator, "load_long_context"):
-            stats: Dict[str, Any] = orchestrator.load_long_context(document)
-        else:
-            stats = {
-                "segments": 0,
-                "entities": 0,
-                "compression_ratio": 1.0,
-                "note": "Orchestrator does not expose load_long_context",
-            }
-
+        router = self.garlic_policy.system_router.router
+        if router is None:
+            raise RuntimeError(
+                "SystemRouter unavailable (Jinja2 fallback active) — cannot "
+                "ingest long context without the neural router."
+            )
+        stats = router.load_long_context(document)
         logger.info(
-            "Context loaded: segments=%s compression=%.2f%%",
-            stats.get("segments", "?"),
-            float(stats.get("compression_ratio", 1.0)) * 100,
+            "Context loaded: segments=%s compression=%.2fx",
+            stats["segments"], stats["compression_ratio"],
         )
         return stats
 
@@ -830,8 +1027,11 @@ class GarlicRLHFSystem(RLHFOrchestrator):
 
         if self.use_garlic_rewards and self.reward_models:
             logger.info("Wrapping reward model with Garlic Ada compression signal")
-            base_rm_model = self.reward_models[0].model
-            garlic_rm = GarlicRewardModel(base_rm_model, self.garlic_policy)
+            # Pass the built RewardModel instance itself (not .model) — the
+            # real RewardModel.__init__ takes a base_model_name: str, not a
+            # pre-built module, so GarlicRewardModel wraps the instance via
+            # composition rather than subclassing (see GarlicRewardModel).
+            garlic_rm = GarlicRewardModel(self.reward_models[0], self.garlic_policy)
             self.reward_models[0] = garlic_rm
             logger.info("GarlicRewardModel ready")
 
@@ -848,7 +1048,7 @@ class GarlicRLHFSystem(RLHFOrchestrator):
             PolicyAdapter compatible with BestOfNSampler, MCTSGenerator,
             AStarGenerator, and the run_pipeline.py benchmark surface.
         """
-        return PolicyAdapter(
+        return PolicyAdapter.from_rlhf_model(
             model=self.garlic_policy,
             tokenizer=self.tokenizer,
         )

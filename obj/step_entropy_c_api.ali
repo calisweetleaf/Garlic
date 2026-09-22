@@ -1,0 +1,479 @@
+V "GNAT Lib v14"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnatf
+A -gnatQ
+A -gnata
+A -fPIC
+A -mtune=generic
+A -march=x86-64
+P SS ZX
+
+RN
+RV NO_DIRECT_BOOLEAN_OPERATORS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_LOOPS
+
+U step_entropy_c_api%b	step_entropy_c_api.adb	cc367f85 NE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.exceptions%s	a-except.adb		a-except.ali
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.elementary_functions%s  a-nuelfu.ads  a-nuelfu.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W interfaces%s		interfac.ads		interfac.ali
+W interfaces.c%s	i-c.adb			i-c.ali
+W step_entropy%s	step_entropy.adb	step_entropy.ali
+W system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.img_flt%s	s-imgflt.ads		s-imgflt.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+W system.storage_elements%s  s-stoele.ads	s-stoele.ali
+
+U step_entropy_c_api%s	step_entropy_c_api.ads	ec38ea08 EE NE OO PK
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W interfaces%s		interfac.ads		interfac.ali
+W interfaces.c%s	i-c.adb			i-c.ali
+W system%s		system.ads		system.ali
+
+D ada.ads		20250523110204 76789da1 ada%s
+D a-assert.ads		20250523110204 ba465f5c ada.assertions%s
+D a-except.ads		20250523110204 e7970cd9 ada.exceptions%s
+D a-ioexce.ads		20250523110204 40018c65 ada.io_exceptions%s
+D a-numeri.ads		20250523110204 84bea7a3 ada.numerics%s
+D a-nuelfu.ads		20250523110204 03e83d1c ada.numerics.elementary_functions%s
+D a-ngelfu.ads		20250523110204 5506716e ada.numerics.generic_elementary_functions%s
+D a-stream.ads		20250523110204 119b8fb3 ada.streams%s
+D a-string.ads		20250523110204 90ac6797 ada.strings%s
+D a-sttebu.ads		20250523110204 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20250523110204 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20250523110204 9eaa38c6 ada.tags%s
+D a-textio.ads		20250523110204 34ef47de ada.text_io%s
+D a-unccon.ads		20250523110204 0e9b276f ada.unchecked_conversion%s
+D interfac.ads		20250523110204 9111f9c1 interfaces%s
+D i-c.ads		20250523110204 aac316ce interfaces.c%s
+D i-cstrea.ads		20250523110204 ffd01b9d interfaces.c_streams%s
+D step_entropy.ads	20260903124202 d8e6651b step_entropy%s
+D step_entropy_c_api.ads  20260903124202 52d397c9 step_entropy_c_api%s
+D step_entropy_c_api.adb  20260903124202 e4a65265 step_entropy_c_api%b
+D system.ads		20250523110204 14286b0f system%s
+D s-assert.ads		20250523110204 9c4520c7 system.assertions%s
+D s-crtl.ads		20250523110204 beb39b9e system.crtl%s
+D s-exctab.ads		20250523110204 91bef6ef system.exception_table%s
+D s-ficobl.ads		20250523110204 dc5161d4 system.file_control_block%s
+D s-imagei.ads		20250523110204 5e131ce0 system.image_i%s
+D s-imager.ads		20250523110204 45c7157d system.image_r%s
+D s-imageu.ads		20250523110204 b0b50650 system.image_u%s
+D s-imgflt.ads		20250523110204 d12816b5 system.img_flt%s
+D s-imgint.ads		20250523110204 67e4edfb system.img_int%s
+D s-imguns.ads		20250523110204 c4e23690 system.img_uns%s
+D s-parame.ads		20260317171448 a1aeab5c system.parameters%s
+D s-powflt.ads		20250523110204 a51ab9b8 system.powten_flt%s
+D s-putima.ads		20250523110204 17291fe4 system.put_images%s
+D s-secsta.ads		20250523110204 578279f5 system.secondary_stack%s
+D s-soflin.ads		20250523110204 df77073e system.soft_links%s
+D s-stache.ads		20250523110204 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20250523110204 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250523110204 ccded4e8 system.storage_elements%s
+D s-traent.ads		20250523110204 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250523110204 fa2a7f59 system.unsigned_types%s
+D s-valspe.ads		20250523110204 b0fcd073 system.val_spec%s
+D s-vaispe.ads		20250523110204 8280550e system.value_i_spec%s
+D s-vauspe.ads		20250523110204 89269ba5 system.value_u_spec%s
+D s-vs_int.ads		20250523110204 06b6b724 system.vs_int%s
+D s-vs_uns.ads		20250523110204 e7f47a27 system.vs_uns%s
+D s-wchcon.ads		20250523110204 d9032363 system.wch_con%s
+G a e
+G c Z s b [c_calculate_token_entropy step_entropy_c_api 44 13 none]
+G c Z s b [c_calculate_token_probability step_entropy_c_api 54 13 none]
+G c Z s b [c_classify_entropy step_entropy_c_api 68 13 none]
+G c Z s b [c_route_step step_entropy_c_api 84 13 none]
+G c Z s b [c_batch_route step_entropy_c_api 99 13 none]
+G c Z s b [c_analyze_chain step_entropy_c_api 117 13 none]
+G c Z s b [c_recommend_pruning step_entropy_c_api 131 13 none]
+G c Z s b [c_compute_histogram step_entropy_c_api 156 13 none]
+G c Z s b [c_normalize_entropy step_entropy_c_api 172 13 none]
+G c Z s b [c_compute_grpo_rewards step_entropy_c_api 194 13 none]
+G c Z s b [c_update_adaptive_state step_entropy_c_api 223 13 none]
+G c Z s b [c_get_adaptive_thresholds step_entropy_c_api 235 13 none]
+G c Z s b [c_get_version step_entropy_c_api 248 13 none]
+G c Z s b [c_get_max_vocab_size step_entropy_c_api 252 13 none]
+G c Z s b [c_get_max_tokens_per_step step_entropy_c_api 256 13 none]
+G c Z b b [log_error step_entropy_c_api 38 14 none]
+G c Z b b [read_float_at step_entropy_c_api 67 13 none]
+G c Z b b [write_float_at step_entropy_c_api 80 14 none]
+G c Z b b [read_int_at step_entropy_c_api 94 13 none]
+G c Z b b [write_int_at step_entropy_c_api 107 14 none]
+G c Z b b [build_logit_array step_entropy_c_api 130 14 none]
+G r c none [c_classify_entropy step_entropy_c_api 68 13 none] [classify_entropy step_entropy 302 13 none]
+G r c none [c_route_step step_entropy_c_api 84 13 none] [route_step step_entropy 365 13 none]
+G r c none [c_batch_route step_entropy_c_api 99 13 none] [classify_entropy step_entropy 302 13 none]
+G r c none [c_analyze_chain step_entropy_c_api 117 13 none] [classify_entropy step_entropy 302 13 none]
+G r c none [c_compute_histogram step_entropy_c_api 156 13 none] [compute_histogram step_entropy 494 13 none]
+G r c none [c_normalize_entropy step_entropy_c_api 172 13 none] [normalize_entropy step_entropy 556 13 none]
+G r c none [c_compute_grpo_rewards step_entropy_c_api 194 13 none] [compute_grpo_rewards step_entropy 585 13 none]
+G r c none [c_update_adaptive_state step_entropy_c_api 223 13 none] [update_threshold_state step_entropy 527 14 none]
+G r c none [c_get_adaptive_thresholds step_entropy_c_api 235 13 none] [get_adaptive_thresholds step_entropy 540 14 none]
+X 1 ada.ads
+16K9*Ada 20e8 20|19r6 20r6 21r6 30r8 40r7 41r11 164r11 235r11
+X 3 a-except.ads
+44K13*Exceptions 309e19 20|20w10 30r12
+84V13*Exception_Message{string} 20|224s33 286s33 329s33 428s33 495s33 596s33
+. 748s33 843s33 877s33 935s33 995s33 1062s33
+X 5 a-numeri.ads
+16K13*Numerics 35e17 20|21r10 164r15 235r15
+X 6 a-nuelfu.ads
+18K22*Elementary_Functions[7|39] 20|21w19 164r24 235r24
+X 7 a-ngelfu.ads
+76V13*Log{float} 20|192s19[6|18] 208s26[6|18] 215s39[6|18]
+84V13*Exp{float} 20|203s31[6|18] 213s15[6|18] 271s31[6|18] 275s21[6|18]
+X 13 a-textio.ads
+58K13*Text_IO 785e16 20|19w10 40r11 41r15
+67P9*File_Type
+189V13*Standard_Error{67P9} 20|41s23
+555U14*Put_Line 20|40s19
+X 15 interfac.ads
+38K9*Interfaces 233e15 19|25r6 30r8 32r23 33r23 20|22r6 29r8
+X 16 i-c.ads
+30K20*C 598e17 19|25w17 30r19 32r34 33r34 20|22w17 29r19
+59I9*int<integer> 19|33r36
+98F9*C_float<float> 19|32r36
+X 18 step_entropy.ads
+51K9*Step_Entropy 601e17 20|18w6 28r8 347r18
+73E9*Entropy_Level 73e45 20|299r15 443r17 516r28
+73n27*Low{73E9} 20|321r15 406r24 484r18 568r18
+73n32*Medium{73E9} 20|322r15 410r24 485r18 569r18
+73n40*High{73E9} 20|323r15 408r24 486r18 570r18
+82F9*Entropy_Value<float> 20|316r11 317r11 318r11 398r10 400r10 402r10 405r29
+. 407r32 479r14 480r14 481r14 553r14 554r14 555r14 810r35 816r38 870r21 981r38
+. 1007r18 1008r18
+103N4*Max_Tokens_Per_Step 20|613r39 769r21 795r39 797r49
+104N4*Max_Vocab_Size 20|136r38 178r24 180r54 248r24 250r54 764r21
+105N4*Max_Histogram_Bins 20|802r47 804r53
+111A9*Logit_Array(float)<integer> 20|133r21
+112A9*Entropy_Array(82F9)<integer> 20|782r23
+119A12*Token_Text{string}<integer>
+143R9*Step_Entropy 152e14 20|347r31
+144i7*Step_Id{natural} 20|392m12
+145a7*Step_Text{119A12} 20|394m12
+146i7*Token_Count{natural} 20|393m12
+148f7*Total_Entropy{82F9} 20|397m12
+149f7*Avg_Entropy{82F9} 20|399m12 405r15 407r18
+150f7*Max_Entropy{82F9} 20|401m12
+151e7*Level{73E9} 20|406m15 408m15 410m15
+175n26*Fast{175E9} 20|416r15
+175n32*Normal{175E9} 20|417r15
+175n40*Slow{175E9} 20|418r15
+177R9*Routing_Decision 184e14 20|348r18
+178e7*Path{175E9} 20|415r21
+179b7*Retrieve_Memory{boolean} 20|421r36
+194A9*Histogram_Bin_Array(natural)<integer>
+196R9*Entropy_Histogram 205e14 20|783r23
+198f7*Bin_Width{float} 20|827r57
+199f7*Min_Entropy{float} 20|828r57
+200f7*Max_Entropy{float} 20|829r57
+201a7*Bins{194A9} 20|835r39
+203f7*Mean_Entropy{float} 20|830r57
+204f7*Std_Dev{float} 20|831r57
+216R9*Threshold_State 222e14 20|954r15 1006r18
+217f7*Running_Mean{float} 20|968m13 984r52 1026m13
+218f7*Running_M2{float} 20|969m13 985r52 1027m13
+219i7*Sample_Count{natural} 20|970m13 986r59 1028m13 1032r16 1034r62
+220f7*Low_Sigma_Factor{float} 20|971m13 974r16 987r52 1029m13
+221f7*High_Sigma_Factor{float} 20|972m13 974r42 988r52 1030m13
+231R9*GRPO_Rewards 236e14 20|895r17
+232f7*R_Skip_Ratio{float} 20|925r56
+233f7*R_Skip_Num{float} 20|926r56
+234f7*R_Response_Len{float} 20|927r56
+235f7*R_Total{float} 20|928r56
+302V13*Classify_Entropy{73E9} 20|315s16 478s19 552s19
+365V13*Route_Step{177R9} 20|413s19
+494V13*Compute_Histogram{196R9} 20|820s20
+495a7 Entropies{112A9} 20|821r10
+496i7 Count{positive} 20|822r10
+497i7 Bin_Count{positive} 20|823r10
+527U14*Update_Threshold_State 20|981s7
+540U14*Get_Adaptive_Thresholds 20|1038s7
+556V13*Normalize_Entropy{float} 20|869s23
+557f7 Entropy{82F9} 20|870r10
+558f7 Mean{float} 20|871r10
+559f7 Std_Dev{float} 20|872r10
+585V13*Compute_GRPO_Rewards{231R9} 20|915s18
+586f7 Skip_Ratio{float} 20|916r10
+587i7 Skip_Count{natural} 20|917r10
+588i7 Response_Len{natural} 20|918r10
+589f7 K_High{float} 20|919r10
+590f7 K_Low{float} 20|920r10
+591i7 Max_Skip{natural} 20|921r10
+592i7 Max_Length{natural} 20|922r10
+X 19 step_entropy_c_api.ads
+28K9*Step_Entropy_C_API 260l5 260e23 20|26b14 1066l5 1066t23
+32F12*C_Float{16|98F9} 47r21 47r37 57r35 69r25 70r25 71r25 85r25 86r25 87r25
+. 88r25 89r25 102r25 103r25 120r25 121r25 134r25 173r18 174r18 175r18 175r34
+. 195r26 198r26 199r26 224r20 20|61r23 69r33 73r11 83r17 87r11 162r21 162r37
+. 187r41 208r17 219r14 233r35 278r17 281r14 295r25 296r25 297r25 304r13 305r13
+. 311r46 338r25 339r25 340r25 341r25 342r25 377r13 384r13 385r13 439r25 440r25
+. 465r13 466r13 506r25 507r25 540r13 541r13 580r38 581r38 582r38 583r38 584r38
+. 585r38 587r10 589r10 607r25 701r13 827r38 828r38 829r38 830r38 831r38 835r13
+. 852r18 853r18 854r18 854r34 859r44 865r44 869r14 886r26 889r26 890r26 904r42
+. 910r45 911r22 925r39 926r39 927r39 928r39 951r20 963r44 984r37 985r37 986r37
+. 987r37 988r37 1042r15 1046r16 1050r15 1054r16
+33I12*C_Int{16|59I9} 46r21 56r21 57r21 71r41 90r25 92r48 101r25 104r48 119r25
+. 122r48 133r25 136r48 158r21 159r21 160r44 196r26 197r26 200r26 201r26 202r49
+. 225r43 238r51 248r34 252r41 256r46 20|65r23 96r33 100r11 110r17 114r11
+. 132r17 161r21 181r21 232r21 233r21 251r21 257r27 258r29 297r41 343r25 345r48
+. 355r18 359r22 438r25 441r48 458r46 505r25 508r48 533r13 606r25 609r48 631r19
+. 687r13 693r28 737r40 741r20 756r34 762r41 764r14 767r46 769r14 778r21 779r21
+. 780r44 795r32 798r25 802r40 805r25 887r26 888r26 891r26 892r26 893r49 952r43
+. 1004r51
+44V13*C_Calculate_Token_Entropy{32F12} 45>8 46>8 47>8 20|159b13 226l8 226t33
+45m8 Logits{21|67M9} 20|160b8 173r10 195r38 197r37 203r58 213r42
+46i8 Logits_Len{33I12} 20|161b8 166r46 181r34
+47f8 Base{32F12} 20|162b8 185r17 187r56 192r31
+54V13*C_Calculate_Token_Probability{32F12} 55>8 56>8 57>8 20|230b13 288l8
+. 288t37
+55m8 Logits{21|67M9} 20|231b8 243r10 263r38 265r37 271r58 275r48
+56i8 Logits_Len{33I12} 20|232b8 237r49 251r34 255r38 258r42
+57i8 Token_Id{33I12} 20|233b8 255r10 255r26 257r40 275r65
+68V13*C_Classify_Entropy{33I12} 69>8 70>8 71>8 20|294b13 331l8 331t26
+69f8 Entropy{32F12} 20|295b8 309r17 311r61 316r33
+70f8 Threshold_Low{32F12} 20|296b8 301r17 304r28 317r33
+71f8 Threshold_High{32F12} 20|297b8 301r42 305r28 318r33
+84V13*C_Route_Step{33I12} 85>8 86>8 87>8 88>8 89>8 90>8 91>8 92>8 20|337b13
+. 430l8 430t20
+85f8 Avg_Entropy{32F12} 20|338b8 374r17 377r28 400r43
+86f8 Total_Entropy{32F12} 20|339b8 398r43
+87f8 Max_Entropy{32F12} 20|340b8 402r43
+88f8 Threshold_Low{32F12} 20|341b8 381r17 384r28 405r51
+89f8 Threshold_High{32F12} 20|342b8 381r42 385r28 407r54
+90i8 Enable_Memory{33I12} 20|343b8 413r37
+91m8 Out_Path{21|67M9} 20|344b8 352r50 364r10
+92m8 Out_Retrieve{21|67M9} 20|345b8 353r50 369r10
+99V13*C_Batch_Route{33I12} 100>8 101>8 102>8 103>8 104>8 20|436b13 497l8
+. 497t21
+100m8 Step_Entropies{21|67M9} 20|437b8 446r10 471r43
+101i8 Count{33I12} 20|438b8 456r10 458r59 470r30
+102f8 Threshold_Low{32F12} 20|439b8 462r17 465r28 480r36
+103f8 Threshold_High{32F12} 20|440b8 462r42 466r28 481r36
+104m8 Out_Decisions{21|67M9} 20|441b8 451r10 484r42 485r42 486r42
+117V13*C_Analyze_Chain{33I12} 118>8 119>8 120>8 121>8 122>8 20|503b13 598l8
+. 598t23
+118m8 Step_Entropies{21|67M9} 20|504b8 520r10 546r43
+119i8 Step_Count{33I12} 20|505b8 518r57 530r10 533r26
+120f8 Threshold_Low{32F12} 20|506b8 537r17 540r28 554r36 558r30
+121f8 Threshold_High{32F12} 20|507b8 537r42 541r28 555r36 563r30
+122m8 Out_Buffer{21|67M9} 20|508b8 525r10 580r23 581r23 582r23 583r23 584r23
+. 585r23 586r23 588r23
+131V13*C_Recommend_Pruning{33I12} 132>8 133>8 134>8 135>8 136>8 20|604b13
+. 750l8 750t27
+132m8 Step_Entropies{21|67M9} 20|605b8 668r10 710r50
+133i8 Step_Count{33I12} 20|606b8 684r10 687r26 691r19 693r41 705r21
+134f8 Pruning_Ratio{32F12} 20|607b8 698r17 698r48 701r28 723r51
+135m8 Out_Indices{21|67M9} 20|608b8 674r10 737r24
+136m8 Out_Count{21|67M9} 20|609b8 630r51 679r10
+156V13*C_Compute_Histogram{33I12} 157>8 158>8 159>8 160>8 20|776b13 845l8
+. 845t27
+157m8 Entropies{21|67M9} 20|777b8 785r10 813r50
+158i8 Count{33I12} 20|778b8 795r10 795r24 798r38 811r30 822r33
+159i8 Bin_Count{33I12} 20|779b8 802r10 802r28 805r38 823r33 833r30
+160m8 Out_Buffer{21|67M9} 20|780b8 790r10 827r23 828r23 829r23 830r23 831r23
+. 834r26
+172V13*C_Normalize_Entropy{32F12} 173>8 174>8 175>8 20|851b13 879l8 879t27
+173f8 Entropy{32F12} 20|852b8 857r17 859r59 870r43
+174f8 Mean{32F12} 20|853b8 871r28
+175f8 Std_Dev{32F12} 20|854b8 863r17 865r59 872r28
+194V13*C_Compute_GRPO_Rewards{33I12} 195>8 196>8 197>8 198>8 199>8 200>8
+. 201>8 202>8 20|885b13 937l8 937t30
+195f8 Skip_Ratio{32F12} 20|886b8 902r17 902r45 904r57 916r33
+196i8 Skip_Count{33I12} 20|887b8 917r35
+197i8 Response_Length{33I12} 20|888b8 918r35
+198f8 K_High{32F12} 20|889b8 908r34 911r37 919r33
+199f8 K_Low{32F12} 20|890b8 908r17 910r60 920r33
+200i8 Max_Skip{33I12} 20|891b8 921r35
+201i8 Max_Length{33I12} 20|892b8 922r35
+202m8 Out_Rewards{21|67M9} 20|893b8 897r10 925r23 926r23 927r23 928r23
+223V13*C_Update_Adaptive_State{33I12} 224>8 225>8 20|950b13 997l8 997t31
+224f8 Entropy{32F12} 20|951b8 961r17 963r59 981r60
+225m8 State_Buf{21|67M9} 20|952b8 956r10 968r56 969r56 970r65 971r56 972r56
+. 984r23 985r23 986r23 987r23 988r23
+235V13*C_Get_Adaptive_Thresholds{33I12} 236>8 237>8 238>8 20|1001b13 1064l8
+. 1064t33
+236m8 State_Buf{21|67M9} 20|1002b8 1010r10 1026r56 1027r56 1028r65 1029r56
+. 1030r56
+237m8 Out_Threshold_Low{21|67M9} 20|1003b8 1015r10 1043r29
+238m8 Out_Threshold_High{21|67M9} 20|1004b8 1020r10 1051r29
+248V13*C_Get_Version{33I12} 20|756b13 760l8 760t21
+252V13*C_Get_Max_Vocab_Size{33I12} 20|762b13 765l8 765t28
+256V13*C_Get_Max_Tokens_Per_Step{33I12} 20|767b13 770l8 770t33
+X 20 step_entropy_c_api.adb
+38U14 Log_Error 38b14 38>25 38>43 43l8 43t17 174s10 179s10 186s10 223s10
+. 244s10 249s10 256s10 285s10 302s10 310s10 328s10 365s10 370s10 375s10 382s10
+. 427s10 447s10 452s10 457s10 463s10 494s10 521s10 526s10 531s10 538s10 595s10
+. 669s10 675s10 680s10 685s10 692s10 699s10 747s10 786s10 791s10 796s10 803s10
+. 842s10 858s10 864s10 876s10 898s10 903s10 909s10 934s10 957s10 962s10 975s10
+. 994s10 1011s10 1016s10 1021s10 1033s10 1061s10
+38a25 Context{string} 42r41
+38a43 Message{string} 42r58
+60i4 C_Float_Stride{39|51I9} 72r43 86r43
+64i4 C_Int_Stride{39|51I9} 99r43 113r43
+67V13 Read_Float_At{19|32F12} 67b13 68>8 69>8 78l8 78t21 140s35 195s23 197s22
+. 203s43 213s27 263s23 265s22 271s43 275s33 471s28 546s28 710s35 813s35 968s41
+. 969s41 970s50 971s41 972s41 1026s41 1027s41 1028s50 1029s41 1030s41
+68m8 Base{21|67M9} 72r10
+69i8 Offset{natural} 72r33
+71m7 Target_Addr{21|67M9} 74r25
+73f7 F{19|32F12} 74m11 74r11 75m27 75r27 77r14
+80U14 Write_Float_At 80b14 81>8 82>8 83>8 92l8 92t22 580s7 581s7 582s7 583s7
+. 584s7 585s7 586s7 588s7 827s7 828s7 829s7 830s7 831s7 834s10 925s7 926s7
+. 927s7 928s7 984s7 985s7 986s7 987s7 988s7
+81m8 Base{21|67M9} 86r10
+82i8 Offset{natural} 86r33
+83f8 Value{19|32F12} 91r12
+85m7 Target_Addr{21|67M9} 88r25
+87f7 F{19|32F12} 88m11 88r11 89m27 89r27 91m7
+94V13 Read_Int_At{19|33I12} 94b13 95>8 96>8 105l8 105t19
+95m8 Base{21|67M9} 99r10
+96i8 Offset{natural} 99r33
+98m7 Target_Addr{21|67M9} 101r25
+100i7 V{19|33I12} 101m11 101r11 102m27 102r27 104r14
+107U14 Write_Int_At 107b14 108>8 109>8 110>8 119l8 119t20 484s28 485s28 486s28
+. 737s10
+108m8 Base{21|67M9} 113r10
+109i8 Offset{natural} 113r33
+110i8 Value{19|33I12} 118r12
+112m7 Target_Addr{21|67M9} 115r25
+114i7 V{19|33I12} 115m11 115r11 116m27 116r27 118m7
+130U14 Build_Logit_Array 130b14 131>8 132>8 133<8 142l8 142t25
+131m8 Addr{21|67M9} 140r50
+132i8 Len{19|33I12} 136r32
+133a8 Result{18|111A9} 138m7 140m10
+135i7 Copy_Len{integer} 139r21
+139i11 I{integer} 140r18 140r56
+148f4 Epsilon{float} 206r21 214r17 277r21
+166i7 N{integer} 178r10 178r20 196r21 202r21 208r38 212r21
+167f7 Log_Base{float} 192m7 208r44 215r49
+168f7 Max_L{float} 195m7 198r17 198m28 203r72 213r56
+169f7 Sum_Exp{float} 203m10 203r21 206r10 213r65
+170f7 Entropy{float} 215m13 215r24 219r34
+171f7 L{float} 197m10 198r13 198r37
+171f10 P{float} 213m10 214r13 215r34 215r44
+196i11 I{integer} 197r45
+202i11 I{integer} 203r66
+212i11 I{integer} 213r50
+222r12 E{3|53R9} 224r52
+237i7 N{integer} 248r10 248r20 264r21 270r21 278r39
+238f7 Max_L{float} 263m7 266r17 266m28 271r72 275r79
+239f7 Sum_Exp{float} 271m10 271r21 277r10 281r58
+240f7 Target_Exp{float} 275m7 281r45
+241f7 L{float} 265m10 266r13 266r37
+264i11 I{integer} 265r45
+270i11 I{integer} 271r66
+284r12 E{3|53R9} 286r52
+299e7 Level{18|73E9} 315m7 320r12
+327r12 E{3|53R9} 329r52
+347r7 Step{18|143R9} 392m7 393m7 394m7 397m7 399m7 401m7 405r10 406m10 407r13
+. 408m10 410m10 413r31
+348r7 Decision{18|177R9} 413m7 415r12 421r27
+352m7 Path_Addr{21|67M9} 356r32
+353m7 Retrieve_Addr{21|67M9} 360r36
+355i7 Path_Out{19|33I12} 356m11 356r11 357m27 357r27 416m25 417m25 418m25
+359i7 Retrieve_Out{19|33I12} 360m11 360r11 361m27 361r27 421m7
+426r12 E{3|53R9} 428r52
+443e7 Level{18|73E9} 478m10 483r15
+444f7 Ent_Val{float} 471m10 474r13 475m13 479r29
+470i11 I{integer} 471r59 484r57 485r57 486r57
+493r12 E{3|53R9} 495r52
+510i7 Compressible_Count{natural} 559m13 559r35 581r54 587r26
+511i7 Informative_Count{natural} 564m13 564r34 582r54
+512i7 Low_Count{natural} 568m28 568r44 583r54
+513i7 Medium_Count{natural} 569m28 569r44 584r54
+514i7 High_Count{natural} 570m28 570r44 585r54
+515f7 Entropy_Sum{float} 573m10 573r25 589r19
+516e7 Level{18|73E9} 552m10 567r15
+517f7 Ent_Val{float} 546m10 548r13 549m13 553r29 558r13 563r13 573r39
+518i7 N{integer} 545r21 580r54 587r55 589r40
+545i11 I{integer} 546r59
+594r12 E{3|53R9} 596r52
+613i7 Max_Steps{integer} 621r41 622r46 691r33 694r49
+615R12 Indexed_Entry 618e17 621r59 637r17
+616i10 Original_Index{integer} 715m29 728r44
+617f10 Entropy{float} 643r47 643r62 715m50
+621A12 Indexed_Array(615R12)<integer> 624r24
+622A12 Result_Index_Array(integer)<integer> 625r24
+624a7 Indexed{621A12} 641r21 643r35 644m16 644r35 647m13 715m13 728r32
+625a7 Result_Indices{622A12} 657r21 659r35 660m16 660r42 663m13 728m10 737r47
+626i7 N{integer} 640r24 705m7 708r21 723r39
+627i7 Num_To_Prune{integer} 723m7 727r21 731r10 732r34 736r21 741r27
+630m7 Count_Out_Addr{21|67M9} 632r33
+631i7 Count_Out{19|33I12} 632m11 632r11 633m27 633r27 741m7
+636U17 Sort_By_Entropy_Ascending 636b17 649l11 649t36 720s7
+637r10 Temp{615R12} 641m13 643r57 647r32
+638i10 J{integer} 642m13 643r19 643r44 644r25 644r44 645m16 645r21 647r22
+640i14 I{integer} 641r30 642r21
+652U17 Sort_Indices_Ascending 652b17 652>41 665l11 665t33 732s10
+652i41 M{integer} 656r24
+653i10 Temp{integer} 657m13 659r56 663r39
+654i10 J{integer} 658m13 659r19 659r51 660r32 660r58 661m16 661r21 663r29
+656i14 I{integer} 657r37 658r21
+708i11 I{integer} 710r66 715r22 715r47
+710f13 Ent{float} 712r16 713m16 715r61
+727i11 I{integer} 728r26 728r41
+736i11 I{integer} 737r37 737r63
+746r12 E{3|53R9} 748r52
+782a7 Ada_Entropies{18|112A9} 810m7 816m13 821r23
+783r7 Histogram{18|196R9} 820m7 827r47 828r47 829r47 830r47 831r47 835r29
+811i11 I{integer} 813r61 816r28
+813f13 Val{float} 815r16 815m31 816r53
+833i11 I{integer} 834r42 835r45
+841r12 E{3|53R9} 843r52
+875r12 E{3|53R9} 877r52
+895r7 Rewards{18|231R9} 915m7 925r48 926r48 927r48 928r48
+933r12 E{3|53R9} 935r52
+954r7 State{18|216R9} 968m7 969m7 970m7 971m7 972m7 974r10 974r36 981m31
+. 981r31 984r46 985r46 986r53 987r46 988r46
+993r12 E{3|53R9} 995r52
+1006r7 State{18|216R9} 1026m7 1027m7 1028m7 1029m7 1030m7 1032r10 1034r56
+. 1038r32
+1007f7 Low_Val{18|82F9} 1038m39 1038r39 1046r32
+1008f7 High_Val{18|82F9} 1038m48 1038r48 1054r32
+1042f10 LV{19|32F12} 1043m14 1043r14 1044m30 1044r30 1046m10
+1050f10 HV{19|32F12} 1051m14 1051r14 1052m30 1052r30 1054m10
+1060r12 E{3|53R9} 1062r52
+X 21 system.ads
+37K9*System 19|26w6 45r21 55r21 91r25 92r25 100r25 104r25 118r25 122r25 132r25
+. 135r25 136r25 157r21 160r21 202r26 225r20 236r28 237r28 238r28 20|23w6
+. 24r6 31r8 32r13 61r38 65r36 68r17 71r30 81r17 85r30 95r17 98r30 108r17
+. 112r30 131r17 160r21 173r19 231r21 243r19 344r25 345r25 352r32 353r32 364r21
+. 369r25 437r25 441r25 446r27 451r26 504r25 508r25 520r27 525r23 605r25 608r25
+. 609r25 630r33 668r27 674r24 679r22 777r21 780r21 785r22 790r23 893r26 897r24
+. 952r20 956r22 1002r28 1003r28 1004r28 1010r22 1015r30 1020r31 21|155e11
+67M9*Address 19|45r28 55r28 91r32 92r32 100r32 104r32 118r32 122r32 132r32
+. 135r32 136r32 157r28 160r28 202r33 225r27 236r35 237r35 238r35 20|32r20
+. 68r24 71r37 81r24 85r37 95r24 98r37 108r24 112r37 131r24 160r28 231r28
+. 344r32 345r32 352r39 353r39 437r32 441r32 504r32 508r32 605r32 608r32 609r32
+. 630r40 777r28 780r28 893r33 952r27 1002r35 1003r35 1004r35
+69m4*Null_Address{67M9} 20|173r26 243r26 364r28 369r32 446r34 451r33 520r34
+. 525r30 668r34 674r31 679r29 785r29 790r30 897r31 956r29 1010r29 1015r37
+. 1020r38
+71N4*Storage_Unit 20|61r45 65r43
+81V14*"="{boolean} 20|173r17 243r17 364r19 369r23 446r25 451r24 520r25 525r21
+. 668r25 674r22 679r20 785r20 790r21 897r22 956r20 1010r20 1015r28 1020r29
+X 39 s-stoele.ads
+40K16*Storage_Elements 20|24w13 31r15 39|90e28
+51I9*Storage_Offset<long_integer> 20|60r30 61r7 64r28 65r7 72r17 86r17 99r17
+. 113r17
+67V14*"+"{21|67M9} 20|72r15 86r15 99r15 113r15
+

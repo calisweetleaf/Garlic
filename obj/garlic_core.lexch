@@ -1,0 +1,7 @@
+[LIBRARY PATH]
+/home/daeron/LAB/Experiments/projects/Garlic/lib/libgarlic_core.so
+[OBJECT FILES]
+/home/daeron/LAB/Experiments/projects/Garlic/obj/step_entropy.o
+20260922050014
+/home/daeron/LAB/Experiments/projects/Garlic/obj/step_entropy_c_api.o
+20260922050014
